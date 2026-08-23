@@ -37,6 +37,9 @@ import os
 import re
 import sys
 import urllib.parse
+import contextlib
+import threading
+
 from collections import OrderedDict
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -1078,14 +1081,15 @@ def _iter_tool_messages(tool: str, dirs: list[str], date_str: str,
                 parsed_paths.add(key)
                 out.append((db, _parse_opencode_db(db, date_str)))
     is_pi = tool == "pi_agent" or tool.startswith("pi")
-    for path in _walk_files(dirs):
+    for path in _walk_files_batched(dirs):
         real = os.path.normcase(os.path.abspath(path))
         if real in parsed_paths:
             continue
         parsed_paths.add(real)
-        msgs = _parse_pi_file(path) if is_pi else parse_file(path)
-        if is_pi and not msgs:  # pi 解析空时回退通用解析
-            msgs = parse_file(path)
+        msgs = (_parse_file_cached(path, tag="pi") if is_pi
+                else _parse_file_cached(path))
+        if is_pi and not msgs:  # pi 解析空时回退通用解析（同样记忆化：跨日只解析一次）
+            msgs = _parse_file_cached(path)
         out.append((path, msgs))
     return out
 
@@ -1106,12 +1110,102 @@ def _generated_lines(text: str) -> int:
 # 约定）。web_ai 部分不缓存（随 web_visits 入参变化），每次现算。
 # ---------------------------------------------------------------------------
 _COLLECT_CACHE: "OrderedDict[tuple, tuple[str, dict]]" = OrderedDict()
-_COLLECT_CACHE_MAX = 8
+_COLLECT_CACHE_MAX = 160  # ≥ 查询模板 max_days(92)：区间查询的逐日结果不再互挤（曾致缓存形同虚设）
+
+# 批内指纹复用（v2.9 性能修复）：_paths_fingerprint 本身要 os.walk 整棵会话目录
+# 树并 stat 全部文件——多日查询逐日调用 collect 时同一棵树被重复遍历 N 次
+# （实测真实大目录单次 ~2s，90 天成本趋势 ≈ 3 分钟）。collect_fingerprint_batch()
+# 提供**显式**批作用域：批内首个 collect 算一次指纹，后续同配置的 collect 直接复用；
+# 批外行为与 v2.7 完全一致（每次现算、文件变化立即可见），无全局状态、无 TTL 语义变更。
+_FP_BATCH = threading.local()
+
+
+@contextlib.contextmanager
+def collect_fingerprint_batch():
+    """批作用域：with 块内的多次 collect 复用首次计算的目录指纹。
+
+    适用：同一份 config 跨多天的批量收集（query 模板 / 报表成本章节）。
+    批内若出现**不同**工具路径组合，会为该组合单独计算并各自记忆，
+    互不污染；退出时恢复默认逐次现算语义。
+    """
+    ctx = _FP_BATCH
+    prev_on = getattr(ctx, "on", False)
+    prev_fp = getattr(ctx, "fp_map", None)
+    prev_walk = getattr(ctx, "walk_map", None)
+    ctx.on = True
+    ctx.fp_map = {}
+    ctx.walk_map = {}
+    try:
+        yield
+    finally:
+        ctx.on = prev_on
+        ctx.fp_map = prev_fp
+        ctx.walk_map = prev_walk
+
+
+def _walk_files_batched(dirs: list[str]) -> list[str]:
+    """批作用域内复用目录枚举结果（os.walk 是逐日收集的第二大开销）；
+    批外直接现算。key=规范化后的目录元组。"""
+    if not getattr(_FP_BATCH, "on", False):
+        return _walk_files(dirs)
+    key = tuple(os.path.normcase(os.path.abspath(d)) for d in dirs)
+    walk_map = _FP_BATCH.walk_map
+    if key not in walk_map:
+        walk_map[key] = _walk_files(dirs)
+    return walk_map[key]
+
+
+def _fingerprint_for_batch(tool_paths: dict[str, list[str]]) -> str:
+    """在批作用域内取指纹：同路径组合只算一次；批外退化为直接计算。"""
+    if not getattr(_FP_BATCH, "on", False):
+        return _paths_fingerprint(tool_paths)
+    key = tuple((t, tuple(ps)) for t, ps in sorted(tool_paths.items()))
+    fp_map = _FP_BATCH.fp_map
+    if key not in fp_map:
+        fp_map[key] = _paths_fingerprint(tool_paths)
+    return fp_map[key]
 
 
 def invalidate_collect_cache() -> None:
-    """清空 collect 结果缓存（测试用；正常运行靠文件指纹自动失效）。"""
+    """清空 collect 结果缓存与解析缓存（测试用；正常运行靠指纹/TTL 自动失效）。"""
     _COLLECT_CACHE.clear()
+    _PARSE_CACHE.clear()
+
+
+# 文件解析记忆化（v2.9 性能修复）：多日查询逐日调用 collect 时，同一份会话文件
+# 被反复 读盘+JSON 解析（真实大目录 90 天 ≈ 上万次重复解析，实测单查询 >100s）。
+# 以 (绝对路径, mtime_ns, size) 为键缓存解析结果：内容未变即命中，追加/修改自动
+# 失效。纯函数语义零变化；条目数与单文件大小双重上限防内存膨胀。
+_PARSE_CACHE: "OrderedDict[tuple, tuple[int, list[dict]]]" = OrderedDict()
+# 双上限防内存膨胀：条目数 + 缓存内容的「源文件字节数」预算。条目上限单独不够——
+# 真实机器每日工作集约 900 个会话文件，512 条的旧上限让 LRU 每天整体换血，
+# 缓存形同虚设（实测 90 天查询每次都全量重解析，>80s）。
+_PARSE_CACHE_MAX_ENTRIES = 4096
+_PARSE_CACHE_MAX_FILE_BYTES = 2 * 1024 * 1024
+_PARSE_CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+
+
+def _parse_file_cached(path: str, *, tag: str = "gen") -> list[dict]:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return []
+    if st.st_size > _PARSE_CACHE_MAX_FILE_BYTES:
+        return _parse_pi_file(path) if tag == "pi" else parse_file(path)
+    key = (tag, os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
+    hit = _PARSE_CACHE.get(key)
+    if hit is not None:
+        _PARSE_CACHE.move_to_end(key)
+        return hit[1]
+    msgs = _parse_pi_file(path) if tag == "pi" else parse_file(path)
+    _PARSE_CACHE[key] = (st.st_size, msgs)
+    # 驱逐：任一上限越界即从最旧端淘汰（同键新 mtime 视为新条目，自然置顶）
+    while (len(_PARSE_CACHE) > _PARSE_CACHE_MAX_ENTRIES
+           or sum(v[0] for v in _PARSE_CACHE.values()) > _PARSE_CACHE_BUDGET_BYTES):
+        if not _PARSE_CACHE:
+            break
+        _PARSE_CACHE.popitem(last=False)
+    return msgs
 
 
 def _paths_fingerprint(tool_paths: dict[str, list[str]]) -> str:
@@ -1138,7 +1232,9 @@ def _paths_fingerprint(tool_paths: dict[str, list[str]]) -> str:
                     if st.st_size > _MAX_FILE_SIZE:
                         continue
                     parts.append(f"{p}|{st.st_mtime_ns}|{st.st_size}")
-    return "\n".join(parts)
+    # 排序后拼接：os.scandir 顺序在 NTFS 上是任意的，不排序则同一目录内容
+    # 每次产生不同指纹串，_COLLECT_CACHE 的比对永远失配（缓存形同虚设）。
+    return "\n".join(sorted(parts))
 
 
 def _collect_cached(date_str: str, config: dict, section: dict,
@@ -1151,7 +1247,7 @@ def _collect_cached(date_str: str, config: dict, section: dict,
          "c": costs_enabled, "p": {k: list(v) for k, v in sorted(pricing.items())}},
         sort_keys=True, ensure_ascii=False)
     key = (date_str, cfg_sig)
-    fp = _paths_fingerprint(tool_paths)
+    fp = _fingerprint_for_batch(tool_paths)
     hit = _COLLECT_CACHE.get(key)
     if hit is not None and hit[0] == fp:
         _COLLECT_CACHE.move_to_end(key)

@@ -12,7 +12,6 @@ import datetime as _dt
 import os
 import shutil
 import sys
-import threading
 import time
 import types
 
@@ -175,47 +174,109 @@ def test_static_zero_write():
     shutil.rmtree(tmp, ignore_errors=True)
 
 def test_pause_resume():
+    """暂停/继续（暂停期间不写入）——伪时钟确定性版。
+
+    原版用真实 time.sleep 编排（2.5s 后暂停/3s 后恢复），首轮轮询被负载拖过
+    暂停点时会只剩 1 条记录（负载 flaky）。现改为与同文件 day_rollover 相同的
+    伪时钟范式：monitor 的 sleep/monotonic/datetime 全部可步进，_pause 替换为
+    「wait 时推进伪时钟」的假事件；按「轮次完成数」在第 3 轮后暂停、第 7 轮后
+    恢复，断言精确到条数与间隔。
+    """
     print("[test] 暂停/继续（暂停期间不写入）")
     tmp = fresh_tmp("pause")
     cfg = classifier.load_config()
     cfg["data_root"] = tmp
     cfg["poll_interval_s"] = 1
     cfg["idle_threshold_s"] = 180
+    # 隔离：同 run_scenario，禁止 finalize_day 触碰真实会话目录
+    cfg["ai_sessions"] = {"enabled": False}
+    cfg["browser_history_enabled"] = False
 
-    clock = FakeClock([FG("code.exe", "main.py")] * 30)
+    import datetime as _dtmod
+
     real_fg = win32core.get_foreground_info
     real_idle = win32core.idle_seconds
+    real_dt_class = monitor.datetime.datetime
+    real_mono = monitor.time.monotonic
+    real_sleep = monitor.time.sleep
+    real_pause_event = monitor._pause
+
+    clock = FakeClock([FG("code.exe", "main.py")] * 40)
+    fake_mono = [0.0]
+    fake_dt = [_dtmod.datetime.now().replace(microsecond=0)]
+
+    class _FakePauseEvent:
+        """is_set 语义同 Event；wait(timeout) 推进伪时钟（模拟暂停期时间流逝）。"""
+
+        def __init__(self):
+            self._flag = False
+
+        def set(self):
+            self._flag = True
+
+        def clear(self):
+            self._flag = False
+
+        def is_set(self):
+            return self._flag
+
+        def wait(self, timeout=None):
+            if timeout:
+                fake_mono[0] += float(timeout)
+                fake_dt[0] += _dtmod.timedelta(seconds=float(timeout))
+            # 暂停分支 continue 会跳过循环尾部的退出检查与 _fake_sleep，
+            # 恢复切换必须由 wait 自己驱动（第 7 轮完成 = 暂停持续 4 个轮次）
+            done["n"] += 1
+            if done["n"] == 7:
+                self._flag = False
+            return True
+
+    class _FakeDT(real_dt_class):  # type: ignore[valid-type]
+        @classmethod
+        def now(cls, tz=None):
+            return fake_dt[0]
+
+    # 轮次完成计数（active 轮计 sleep，paused 轮计 wait）：第 3 轮后暂停、第 7 轮后恢复
+    done = {"n": 0}
+
+    def _fake_sleep(secs):
+        fake_mono[0] += float(secs)
+        fake_dt[0] += _dtmod.timedelta(seconds=float(secs))
+        done["n"] += 1
+        if done["n"] == 3:
+            monitor.set_paused(True)
+        elif done["n"] == 7:
+            monitor.set_paused(False)
+
     win32core.get_foreground_info = clock.fg_now
     win32core.idle_seconds = clock.idle_now
+    monitor.datetime.datetime = _FakeDT  # type: ignore[attr-defined]
+    monitor.time.monotonic = lambda: fake_mono[0]  # type: ignore[attr-defined]
+    monitor.time.sleep = _fake_sleep  # type: ignore[attr-defined]
+    monitor._pause = _FakePauseEvent()
     monitor.stop_event.clear()
     monitor.set_paused(False)
 
-    recs: list[dict] = []
-    def runner():
-        nonlocal recs
-        recs = monitor.run_daemon(cfg, test_seconds=30)
+    try:
+        recs = monitor.run_daemon(cfg, test_seconds=12)
+    finally:
+        win32core.get_foreground_info = real_fg
+        win32core.idle_seconds = real_idle
+        monitor.datetime.datetime = real_dt_class  # type: ignore[attr-defined]
+        monitor.time.monotonic = real_mono  # type: ignore[attr-defined]
+        monitor.time.sleep = real_sleep  # type: ignore[attr-defined]
+        monitor._pause = real_pause_event
+        monitor.stop_event.clear()
+        monitor.set_paused(False)
 
-    th = threading.Thread(target=runner, daemon=True)
-    th.start()
-    time.sleep(2.5)
-    monitor.set_paused(True)   # 暂停
-    time.sleep(3.0)
-    monitor.set_paused(False)  # 恢复
-    time.sleep(2.5)
-    monitor.stop_event.set()
-    th.join(timeout=10)
-
-    win32core.get_foreground_info = real_fg
-    win32core.idle_seconds = real_idle
-
-    check(not th.is_alive(), "守护线程正常退出")
     check(len(recs) == 2, "暂停截断 + 恢复后各 1 条", f"实际 {len(recs)}")
     if len(recs) == 2:
-        gap = (recs[1]["start"] > recs[0]["end"])
-        check(gap, "恢复后的会话在暂停之后开始")
-        pause_gap = (_dt.datetime.fromisoformat(recs[1]["start"]) - _dt.datetime.fromisoformat(recs[0]["end"])).total_seconds()
-        check(2.0 <= pause_gap <= 8.0, f"两条会话间隔约等于暂停时长（{pause_gap:.1f}s）")
+        gap = (_dt.datetime.fromisoformat(recs[1]["start"])
+               - _dt.datetime.fromisoformat(recs[0]["end"])).total_seconds()
+        check(gap > 0, "恢复后的会话在暂停之后开始")
+        check(2.0 <= gap <= 8.0, f"两条会话间隔约等于暂停时长（{gap:.1f}s）")
     shutil.rmtree(tmp, ignore_errors=True)
+
 
 def test_retention():
     print("[test] 保留清理（超过保留期删除，只删 YYYY-MM-DD 目录）")

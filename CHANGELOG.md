@@ -19,6 +19,12 @@
 - **确定性修复**：移植时把 legacy 内同款的 `time.time()` 墙钟锚造数改为正午锚 `_day_noon_ft`（消除午夜抖动类 flaky）
 - **覆盖率**：门禁维持 70%，实测 **79%**（合并前 73%）；pytest 总量 429 → **483**（59 个文件）
 
+### 修复（未发布）
+
+- **多日 AI 成本查询性能（实测 121s → 0.95s）**：①`_paths_fingerprint` 按 os.walk 返回序拼接导致指纹串不确定，v2.7 结果缓存在真实目录上从未命中——改为排序后拼接（语义不变）；②`_COLLECT_CACHE_MAX` 8 → 160（原值 < 查询 max_days=92，区间查询逐日结果互挤，缓存形同虚设）；③新增会话文件解析记忆化 `(解析器, 路径, mtime_ns, size)`，条目 ≤4096 且源字节预算 ≤256MB 双上限；④新增 `collect_fingerprint_batch()` 批作用域并由 `query.run_query` 整体包裹——一次查询的目录树遍历/枚举从「每日一次」降为「每次查询一次」
+- **`/api/budget` 月度档边界年 500**：`9999-12` 月末算法（+4 天跨越 date 上限）抛 OverflowError 未被捕获且异常路径返回 500，违反端点自身「配置未开启/无效/异常 → 200 空态」契约——`_month_days` 补接 OverflowError 按无效月处理，handler 异常路径兑现 200 空态
+- **测试确定性**：`test_pause_resume` 由真实 sleep 编排（负载下首轮轮询越窗即 flaky）改为伪时钟全确定版；顺带修场景测试隔离缺陷——`finalize_day` 报表链此前会扫描开发机真实 AI 会话目录，现 `run_scenario` 助手统一关闭 ai_sessions/浏览器扫描
+
 ### 文档（未发布）
 
 - `README.md` / `README.en.md` 测试命令统一为 pytest+coverage 单一口径；`docs/ROADMAP.md` 翻转「合并暂缓」结论为已完成；`docs/TEST_WORKFLOW.md` v1.2 记录迁移完成方式（机械整移 vs 原计划差异）；`TODO.md` 交接命令同步

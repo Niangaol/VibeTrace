@@ -131,6 +131,9 @@ def _reset_monitor_state(monkeypatch):
     # 释放 SQLite 共享连接（Windows 下打开的句柄会阻塞临时目录清理）
     import sqlite_store
     sqlite_store.close_connections()
+    # 清 ai_sessions 结果/指纹缓存：指纹带短 TTL，跨测试同目录改文件会读到旧值
+    import ai_sessions
+    ai_sessions.invalidate_collect_cache()
 
 
 # ---------------------------------------------------------------------------

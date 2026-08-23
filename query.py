@@ -832,37 +832,45 @@ def run_query(q, data_root: str, config: dict,
     if not qq:
         return {"ok": False, "error": "empty question"}
     today = today or _today()
-    for tpl in TEMPLATES:
-        for pattern in tpl["patterns"]:
-            match = pattern.match(qq)
-            if not match:
-                continue
-            gd = match.groupdict()
-            try:
-                days, label = _resolve_period(gd.get("period") or "", today, cfg)
-            except ValueError as exc:
-                return {"ok": False, "error": f"invalid period: {exc}"}
-            tool = (gd.get("tool") or "").strip() or None
-            if tool and tool.lower() in ("ai", "all", "全部"):
-                tool = None  # 防「AI」被误捕为工具名（防御）
-            params = {
-                "period": (gd.get("period") or "").strip(),
-                "period_label": label,
-                "tool": tool,
-                "project": None,
-                "scope": gd.get("scope") or "工具",
-                "n": int(gd.get("n") or 1) if gd.get("n") else 1,
-            }
-            # 双周期模板（q6 产出对比）：把对比周期一并解析进 params
-            if gd.get("cmp"):
+    # 指纹批作用域：一次查询内多日收集只遍历一遍 AI 会话目录树。
+    # （_collect_cached 逐日 stat 全树的成本在大目录下 ~2s/次，90 天趋势曾 ≈3 分钟）
+    import ai_sessions  # noqa: PLC0415 —— 惰性导入，与其他模板解析器一致
+
+    def _dispatch() -> dict:
+        for tpl in TEMPLATES:
+            for pattern in tpl["patterns"]:
+                match = pattern.match(qq)
+                if not match:
+                    continue
+                gd = match.groupdict()
                 try:
-                    cmp_days, cmp_label = _resolve_period(gd["cmp"], today, cfg)
+                    days, label = _resolve_period(gd.get("period") or "", today, cfg)
                 except ValueError as exc:
                     return {"ok": False, "error": f"invalid period: {exc}"}
-                params["cmp_days"] = cmp_days
-                params["cmp_label"] = cmp_label
-            return _run_resolver(tpl, days, params, data_root, config)
-    return {"ok": False, "error": "unsupported question"}
+                tool = (gd.get("tool") or "").strip() or None
+                if tool and tool.lower() in ("ai", "all", "全部"):
+                    tool = None  # 防「AI」被误捕为工具名（防御）
+                params = {
+                    "period": (gd.get("period") or "").strip(),
+                    "period_label": label,
+                    "tool": tool,
+                    "project": None,
+                    "scope": gd.get("scope") or "工具",
+                    "n": int(gd.get("n") or 1) if gd.get("n") else 1,
+                }
+                # 双周期模板（q6 产出对比）：把对比周期一并解析进 params
+                if gd.get("cmp"):
+                    try:
+                        cmp_days, cmp_label = _resolve_period(gd["cmp"], today, cfg)
+                    except ValueError as exc:
+                        return {"ok": False, "error": f"invalid period: {exc}"}
+                    params["cmp_days"] = cmp_days
+                    params["cmp_label"] = cmp_label
+                return _run_resolver(tpl, days, params, data_root, config)
+        return {"ok": False, "error": "unsupported question"}
+
+    with ai_sessions.collect_fingerprint_batch():
+        return _dispatch()
 
 
 # ---------------------------------------------------------------------------

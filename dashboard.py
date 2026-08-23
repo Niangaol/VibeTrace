@@ -939,8 +939,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             import budget  # noqa: PLC0415 —— 惰性导入，失败只影响本端点
             self._send_json(budget.budget_status(date, root, config, period=period))
-        except Exception as exc:  # noqa: BLE001 —— 预算异常降级为关闭态，不 500 拖垮概览
-            self._send_json({"error": f"budget unavailable: {exc}"}, 500)
+        except Exception as exc:  # noqa: BLE001 —— 兑现 docstring 契约：异常降级为 200 关闭态（曾误发 500）
+            self._send_json({"enabled": False, "period": period,
+                             "status": "invalid",
+                             "error": f"budget unavailable: {exc}"}, 200)
 
     # ------------------------------------------------------------------
     # 洞察（规则 / AI / 行为 / 人格 / 设置 / Ollama）

@@ -150,3 +150,13 @@ def test_conversation_model_from_assistant_only(tmp_path):
     convs = data["total"]["conversations"]
     assert convs, "应解析出会话"
     assert convs[0]["model"] == "claude-opus-5", f"会话模型应为助手模型，实际 {convs[0]['model']}"
+
+
+def test_budget_monthly_overflow_year_returns_200_empty(api_server):
+    """回归：/api/budget?period=monthly&date=9999-12 曾因 OverflowError 冒 500，
+    违反端点自身「配置未开启/无效/异常 → 200 空态」契约。"""
+    client, _root = api_server
+    st, body, _ = client.get("/api/budget?period=monthly&date=9999-12")
+    assert st == 200
+    assert body.get("status") in ("invalid", "disabled")
+    assert body.get("enabled") is False or body.get("status") == "invalid"

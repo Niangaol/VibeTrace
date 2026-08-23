@@ -259,3 +259,19 @@ def test_collect_day_not_found_and_crash(monkeypatch):
     monkeypatch.setattr(ai_sessions, "collect", boom)
     out = budget._collect_day("2026-08-20", ROOT, BASE)
     assert out["found"] is False and out["cost"] == 0.0  # 解析异常降级
+
+def test_month_days_boundary_months_do_not_raise():
+    """9999-12 月末 +4 天跨 date 上限曾抛 OverflowError（except 漏接）→ 应按无效月返回空。"""
+    assert budget._month_days("9999-12") == []
+    assert budget._month_days("0000-01") == []
+    # 正常月份不受影响：平年2月/闰年2月/大月
+    assert len(budget._month_days("2026-02")) == 28
+    assert len(budget._month_days("2028-02")) == 29
+    assert len(budget._month_days("2026-12")) == 31
+
+
+def test_budget_status_overflow_month_returns_invalid(tmp_path):
+    """/api/budget 的 monthly 档传入边界月 → invalid 空态而非异常。"""
+    cfg = budget.budget_config({"budget": {"enabled": True, "monthly": 10}})
+    st = budget.budget_status("9999-12", str(tmp_path), cfg, period="monthly")
+    assert st["status"] == "invalid"

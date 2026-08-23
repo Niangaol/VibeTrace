@@ -99,6 +99,10 @@ def run_scenario(name: str, fg_list: list, idle_list=None, seconds: int = 9,
     cfg["data_root"] = tmp
     cfg["poll_interval_s"] = poll
     cfg["idle_threshold_s"] = idle_threshold
+    # 测试隔离：finalize_day 会触发报表的 AI 会话/浏览器深度统计，若沿用全局
+    # 配置将扫描开发机真实会话目录（分钟级且不确定）。场景测试一律关闭。
+    cfg["ai_sessions"] = {"enabled": False}
+    cfg["browser_history_enabled"] = False
 
     monitor.stop_event.clear()  # 防止前序测试残留的停止信号
     monitor.set_paused(False)

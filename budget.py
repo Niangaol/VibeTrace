@@ -72,7 +72,9 @@ def _month_days(month_str: str) -> list[str]:
         last = datetime.date(year, mon, 1).replace(day=28) + datetime.timedelta(days=4)
         last = last - datetime.timedelta(days=last.day)
         return [f"{month_str}-{d:02d}" for d in range(1, last.day + 1)]
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError：9999-12 这类边界月，+4 天跨过 date 上限(9999-12-31)；
+        # 与非法月份同样按「无效」处理，返回空列表由上层转 invalid 空态。
         return []
 
 
