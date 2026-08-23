@@ -8,11 +8,11 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [2.8.1] - 2026-08-23
 
-> Theme: unified test system — `test_all.py` retired + deep full-chain E2E.
+> Theme: small patch — multi-day AI cost query performance fix (121s→0.95s) + budget endpoint edge-case fix + unified test system (`test_all.py` retired, full-chain E2E). No new features.
 
-### Tests (Unreleased)
+### Tests (2.8.1)
 
 - **Two-tier tests merged**: all 47 test functions (336 assertions) of `test_all.py` mechanically ported by domain into four pytest modules — monitor scenarios / report content / dashboard API surface / insights ecosystem — plus a shared support layer (`tests/support/scenario.py`); zero assertion loss (statically verified call-count parity); `test_all.py` deleted, legacy CI step removed, pyproject omit cleaned up
 - **Full-chain E2E**: new `tests/e2e/test_full_chain.py` with seven ordered stages over one simulated data world: seeding → SQLite mirror rebuild/verify → day/month reports & CSV exports → dashboard read surface (20+ endpoints) → write cycle (groups add/delete, goals settings persistence) → backup zip → restore into a fresh root with aggregate reconciliation → security spot-checks (token auth 401/200, CSP headers, cross-origin POST rejection) → insights↔query consistency
@@ -25,7 +25,7 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 - **`/api/budget` monthly edge-year 500**: month-end arithmetic for `9999-12` (+4 days past date.max) raised an uncaught OverflowError and the handler returned 500 against its own documented "disabled/invalid/error → 200 empty state" contract; `_month_days` now treats it as invalid month and the handler honors 200
 - **Test determinism**: `test_pause_resume` rewritten from real-sleep choreography (load-flaky) to a fully fake-clock version; scenario tests no longer scan the developer machine's real AI session directories via `finalize_day`
 
-### Docs (Unreleased)
+### Docs (2.8.1)
 
 - Unified test commands in both READMEs; ROADMAP flips "merge deferred" to done; TEST_WORKFLOW v1.2 records how the migration actually happened; TODO handover commands synced
 
@@ -472,6 +472,7 @@ Pure standard library with zero third-party dependencies; static CPU < 0.1%, mem
 - Tests: test_all adds 11 dashboard API tests (endpoints / 403 / security headers / error codes / path traversal);
   post-build `UsageMonitor.exe --version` smoke test; all 125 assertions pass the gate.
 
+[2.8.1]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.0
 [2.7.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.7.0
 [2.2.0]: https://github.com/Niangaol/UsageMonitor/releases/tag/v2.2.0

@@ -2,7 +2,7 @@
 
 > 交接时间：2026-08-20 · 项目：VibeTrace（刻迹）（VibeTrace）
 > 远程仓库：https://github.com/Niangaol/VibeTrace（master 分支）
-> 当前版本：v2.8.0（已发布，2026-08-23）
+> 当前版本：v2.8.1（已发布，2026-08-23）
 > 当前提交：7d60620
 
 ---
@@ -28,6 +28,7 @@
 | v2.5.2 | ✅ 已发布 | 精炼 AI 会话模型识别：会话级模型仅统计 assistant 消息已知模型，「未识别」大幅减少 |
 | v2.5.3 | ⚠️ 无 tag/Release | 仅在 CHANGELOG 有记录，未打 tag（AI 价格设置可用 + 导出进度反馈） |
 | v2.7.0 | ✅ 已发布 | 行动与目标：告警闭环（alerts.py · 预算 warn/exceed + 连续工作休息提醒，托盘气泡）；每日目标与 streak（goals.py · 可选默认关闭，/api/goals + 概览进度面板 + 设置开关组）；全局性能优化（AI/浏览器历史指纹缓存、SQLite 提速、Token 真实用量优先与加权估算、learn.py 基线） |
+| v2.8.1 | ✅ 已发布 | 小版本收口（无新特性）：多日 AI 成本查询 121s→0.95s（指纹确定性/缓存容量/解析记忆化/查询级批作用域）；/api/budget 边界年 500 兑现 200 空态契约；测试体系合二为一（test_all.py 47 函数并入 pytest 并退役，全链路 E2E 七阶段，覆盖率实测 79%） |
 | v2.8.0 | ✅ 已发布 | 工程收尾与测试补位：dashboard 纯函数外置 dashboard_util.py（1917→1714 行）、frontend smoke（4 项）+ e2e 冒烟（2 项）、覆盖率门禁 65→70；Git 侧采纳率代理指标（/api/adoption · 免责+折叠展示，confidence 永不 high）；受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势） |
 
 ---

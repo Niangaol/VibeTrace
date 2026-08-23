@@ -8,11 +8,11 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
-## [未发布]
+## [2.8.1] - 2026-08-23
 
-> 主题：测试体系合二为一——`test_all.py` 退役 + 全链路 E2E 深化。
+> 主题：小版本收口——多日 AI 成本查询性能修复（121s→0.95s）+ 预算端点边界修复 + 测试体系合二为一（`test_all.py` 退役、全链路 E2E）。无新特性。
 
-### 测试（未发布）
+### 测试（2.8.1）
 
 - **双测试体系合并**：`test_all.py`（47 个测试函数、336 项断言）按域机械整移为 pytest 四个主题模块——`tests/integration/test_monitor_scenarios.py`（15，监控/分类/跨天场景）、`tests/integration/test_report_content.py`（9，报表/浏览器历史/分组）、`tests/api/test_dashboard_surface.py`（5，仪表盘 API 面）、`tests/integration/test_insights_ecosystem.py`（18，洞察/AI 会话/更新器/sqlite）+ 共享支撑层 `tests/support/scenario.py`；断言零丢失（check/ok 调用数静态守恒），`test_all.py` 物理删除，CI 删除 legacy 步骤，pyproject omit 清理
 - **全链路 E2E**：新增 `tests/e2e/test_full_chain.py` 七阶段一条龙（同一模拟数据世界）：造数→SQLite 镜像 rebuild/verify→日报/月报/CSV 导出→仪表盘只读面 20+ 端点→写循环（分组增删 / 目标设置持久化）→备份 zip→恢复到全新根并复核聚合一致→安全抽查（口令 401/带 token 200/CSP 头/跨源 POST 拒绝）→洞察↔查询一致性对账
@@ -25,7 +25,7 @@
 - **`/api/budget` 月度档边界年 500**：`9999-12` 月末算法（+4 天跨越 date 上限）抛 OverflowError 未被捕获且异常路径返回 500，违反端点自身「配置未开启/无效/异常 → 200 空态」契约——`_month_days` 补接 OverflowError 按无效月处理，handler 异常路径兑现 200 空态
 - **测试确定性**：`test_pause_resume` 由真实 sleep 编排（负载下首轮轮询越窗即 flaky）改为伪时钟全确定版；顺带修场景测试隔离缺陷——`finalize_day` 报表链此前会扫描开发机真实 AI 会话目录，现 `run_scenario` 助手统一关闭 ai_sessions/浏览器扫描
 
-### 文档（未发布）
+### 文档（2.8.1）
 
 - `README.md` / `README.en.md` 测试命令统一为 pytest+coverage 单一口径；`docs/ROADMAP.md` 翻转「合并暂缓」结论为已完成；`docs/TEST_WORKFLOW.md` v1.2 记录迁移完成方式（机械整移 vs 原计划差异）；`TODO.md` 交接命令同步
 
@@ -490,6 +490,7 @@
 - 测试：test_all 新增 11 项 dashboard API 测试（端点 / 403 / 安全头 / 错误码 / 路径穿越），
   构建后 `UsageMonitor.exe --version` 冒烟，全量 125 项门禁通过。
 
+[2.8.1]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.0
 [2.7.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.7.0
 [2.2.0]: https://github.com/Niangaol/UsageMonitor/releases/tag/v2.2.0
