@@ -19,11 +19,12 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 - **Determinism fix**: legacy wall-clock (`time.time()`) seeding anchors replaced with noon-anchored `_day_noon_ft` (removes the midnight-flake class)
 - **Coverage**: gate stays 70%, measured **79%** (was 73%); pytest total 429 → **483** (59 files)
 
-### Fixed (Unreleased)
+### Fixed (2.8.1)
 
 - **Multi-day AI cost query performance (121s → 0.95s measured)**: fingerprint string was os.walk-order dependent so the v2.7 result cache never matched on real directories (now sorted); `_COLLECT_CACHE_MAX` 8 → 160 (was smaller than query max_days=92, so range results evicted each other); added session-file parse memoization keyed by `(parser, path, mtime_ns, size)` capped at 4096 entries / 256MB source bytes; new `collect_fingerprint_batch()` scope wraps `query.run_query` so directory walks happen once per query instead of once per day
 - **`/api/budget` monthly edge-year 500**: month-end arithmetic for `9999-12` (+4 days past date.max) raised an uncaught OverflowError and the handler returned 500 against its own documented "disabled/invalid/error → 200 empty state" contract; `_month_days` now treats it as invalid month and the handler honors 200
 - **Test determinism**: `test_pause_resume` rewritten from real-sleep choreography (load-flaky) to a fully fake-clock version; scenario tests no longer scan the developer machine's real AI session directories via `finalize_day`
+- **CI flake fix**: conftest `seed_day` now invalidates the days-cache after writing — directory mtime has clock granularity (~10ms), so seeding and reading within the same tick returned a stale day list (reproduced on Windows CI fast disks: goals streak misjudged a met day, failing the build)
 
 ### Docs (2.8.1)
 
