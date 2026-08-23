@@ -156,12 +156,23 @@ def make_record(date: str, start_h: int, minutes: float, exe: str = "code.exe",
 
 
 def seed_day(root: str, date: str, records: list[dict]) -> str:
-    """向 <root>/<date>/usage.jsonl 写入会话记录，返回日期目录路径。"""
+    """向 <root>/<date>/usage.jsonl 写入会话记录，返回日期目录路径。
+
+    写入后主动失效 days-cache：目录 mtime 存在时钟粒度（~10ms 级），同一刻度内
+    「播种→读取」会让 _available_days 返回过期列表（CI 快速盘上真实复现过：
+    goals streak 测试拿到旧列表误判当日未达成）。
+    """
     day_dir = os.path.join(root, date)
     os.makedirs(day_dir, exist_ok=True)
     with open(os.path.join(day_dir, "usage.jsonl"), "w", encoding="utf-8") as fh:
         for rec in records:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    try:
+        import dashboard_util
+        dashboard_util.invalidate_days_cache()
+    except Exception:  # noqa: BLE001 —— 失效失败不影响造数本身
+        pass
+    return day_dir
     return day_dir
 
 
