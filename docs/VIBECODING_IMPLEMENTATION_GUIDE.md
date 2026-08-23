@@ -52,6 +52,9 @@
 
 ### 1.4 测试基线（pytest 85 项 + 旧 test_all 兼容）
 
+> **⚠️ 快照已过期（2026-08-23 更新）**：下表为早期基线。当前实际：**59 个测试文件 / 483 项用例**
+> （含全链路 E2E 七阶段），`test_all.py` 已整体并入 pytest 并退役，覆盖率门禁 70% 实测 79%。
+
 | 层 | 目录 | 现有文件（test 函数数） |
 |---|---|---|
 | Unit | `tests/unit/` | test_ai_sessions(9), test_classifier(9), test_classifier_extended(7), test_insights_extra(7), test_paths(3), test_report(3), test_sqlite_extra(4), test_time_saved(5), test_updater(7) = **54** |
@@ -70,9 +73,8 @@
 
 ```powershell
 # 测试
-python -m pytest tests/ -q                     # 85 项全过
+python -m pytest tests/ -q                     # 483 项全过（test_all.py 已并入并退役）
 python -m pytest tests/unit -q                 # 最快反馈
-python test_all.py                             # 334 项 check 兼容兜底
 ruff check .                                   # 0 违规
 
 # 覆盖率（注意：pyproject 默认 addopts=-q，再传 -q 会变 -qq 吞掉 "N passed"）

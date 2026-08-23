@@ -29,7 +29,6 @@ source = [
     "learn", "alerts", "goals"
 ]
 omit = [
-    "test_all.py",
     "tests/*",
     "*/conftest.py"
 ]

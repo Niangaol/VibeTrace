@@ -111,7 +111,7 @@
 - **Python**：默认 `python`=3.14；带 PyInstaller 的 3.11 在
   `C:\Users\niangao\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe`
 - **构建**：`python -m PyInstaller VibeTrace.spec --noconfirm`（先停守护任务，exe 会被占用）
-- **测试**：`python -m pytest tests/ -q`（85 项全过，六层金字塔）+ `python test_all.py`（334 项 check 兼容兜底）；`ruff check .`（0 违规）；`coverage run -m pytest tests/`（覆盖率 56%，`fail-under=50%` 门禁）；详见 `docs/TEST_WORKFLOW.md`
+- **测试**：`python -m pytest tests/ -q`（483 项全过；test_all.py 已并入退役）；`ruff check .`（0 违规）；`coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q && coverage report --fail-under=70`（实测 79%）；详见 `docs/TEST_WORKFLOW.md`
   - 若 Windows 临时目录权限导致测试失败，可先清理 `%TEMP%\usagemon_hist_*` / `dsh-*`
 - **发布**：`git tag vX.Y.Z && git push origin vX.Y.Z` → CI 自动测试→构建→冒烟→Release
 - **守护**：计划任务 `VibeTrace`（exe）/`VibeTraceReport`（每日 19:30 日报）

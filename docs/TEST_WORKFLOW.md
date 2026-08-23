@@ -1,6 +1,8 @@
 # VibeTrace 测试流程方案
 
-> **文档版本**：v1.1 | **更新日期**：2026-08-20 | **状态**：已落地（Phase 1：pytest 85项 + CI fast/full + 覆盖率门禁 50%）
+> **文档版本**：v1.2 | **更新日期**：2026-08-23 | **状态**：双体系已合并（test_all.py 退役，pytest 483 项 + 全链路 E2E，覆盖率门禁 70% 实测 79%）
+
+> **✅ 2026-08-23 合并完成**：`test_all.py` 的 47 个测试函数已机械整移为 `tests/` 四个主题模块（monitor 场景 / 报表内容 / 仪表盘 API 面 / 洞察生态）+ `tests/support/scenario.py` 共享支撑层；check/ok 断言调用数守恒（339 处零丢失）；CI 已删除 legacy 步骤；文件物理删除。详见 §3.1 末尾的完成说明。
 
 ## 一、现状与痛点
 
@@ -64,7 +66,6 @@ flowchart TD
 
 ```
 D:\VibeTrace（刻迹）
-├── test_all.py              # 保留兼容（过渡期）
 ├── tests/
 │   ├── conftest.py          # pytest 全局 fixtures：临时目录、mock_win32、mock_config
 │   ├── __init__.py
@@ -115,7 +116,12 @@ D:\VibeTrace（刻迹）
 └── pyproject.toml           # pytest / coverage / ruff 配置集中化
 ```
 
-### 3.1 迁移路径（保留 `test_all.py` 兼容）
+### 3.1 迁移路径（已完成——实际执行方式与原计划有差异）
+
+> **完成记录（2026-08-23）**：最终未采用「逐函数改写 + pytest monkeypatch fixture」的原计划，
+> 而是**机械整移**：按域切为 4 个主题文件，助手集中到 `tests/support/scenario.py`，
+> `check()` 失败即 raise 本就兼容 pytest，无需改写断言。优点：零丢失、可对账、一次到位；
+> 唯一实质改动是 `_chrome_ft` 改正午锚定（消除午夜抖动类 flaky）。原四阶段计划保留如下存档。
 
 ```mermaid
 flowchart LR
@@ -165,10 +171,10 @@ flowchart LR
    - `tests/performance/`：使用 `time.perf_counter()` 包裹报表生成函数，断言耗时 < 阈值
    - `tests/security/`：构造非法 Origin、非法路径、非法下载地址，断言被拒绝
 
-4. **Phase 4（退役旧版）**
-   - CI 中 `coverage run test_all.py` 替换为 `coverage run -m pytest tests/`
-   - `test_all.py` 保留作为“兼容性兜底”，但不再维护新增 case
-   - 启用 `fail-under=85%`
+4. **Phase 4（退役旧版）✅**
+   - ✅ CI 中 legacy 步骤删除，coverage 直接跑 pytest 分层 + e2e
+   - ✅ `test_all.py` 物理删除（pyproject omit 同步清理）
+   - 门禁维持 70%（实测 79%；85% 目标待后续提阈值）
 
 ---
 

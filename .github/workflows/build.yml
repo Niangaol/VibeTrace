@@ -16,10 +16,8 @@ jobs:
       - name: Install test dependencies
         run: pip install coverage pytest
       - name: Run tests with coverage (layered pytest suite)
-        run: coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance -q
+        run: coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
         timeout-minutes: 10
-      - name: Legacy compatibility suite (test_all.py, no coverage gate)
-        run: python test_all.py
       - name: Coverage report (gate >= 70)
         run: coverage report -m --fail-under=70
       - name: Generate coverage.xml

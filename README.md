@@ -233,8 +233,10 @@ AI 编程深度追踪规划：
 
 
 ```powershell
-python test_all.py   # 336 项断言，无头确定性
-ruff check .         # 0 违规
+python -m pytest tests -q   # 483 项用例（单测/集成/API/安全/性能/E2E 全链路）
+coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
+coverage report --fail-under=70
+ruff check .                # 0 违规
 ```
 
 CI：测试 → coverage（含 insights/updater/sqlite_store/ai_sessions）→ PyInstaller 构建 → exe 冒烟 → 打 tag 发布 Release。

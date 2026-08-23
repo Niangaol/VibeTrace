@@ -35,7 +35,7 @@
 - ✅ 可选 SQLite 后端与一致性校验（JSONL 仍为原始事实源）
 - ✅ 纯 Python + ctypes，零第三方运行时依赖
 - ✅ 打包为独立 exe，支持安装/卸载、应用内更新
-- ✅ 336 项断言测试覆盖（test_all.py 无头兜底；另 pytest 429 项）
+- ✅ 统一测试体系：pytest 483 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役）
 - ✅ ROADMAP Phase 1：对话轮次 / Token 估算 / 按模型·项目拆分 / 会话详情面板与日报章节
 - ✅ ROADMAP Phase 3：按模型费用估算 / 按项目成本分摊 / 成本面板与日报成本章节（+ 周/月汇总成本账本）
 - ✅ ROADMAP Phase 4：死循环检测 + 专注度评分 + Vibe 编程人格分析（洞察页面板与日报今日建议）
@@ -50,7 +50,7 @@
 - ✅ 每日目标 streak（`goals.py`：总活跃/编码时长目标 + 连续达成天数）
 - ✅ 个性化基线（`learn.py`：滑动窗口 + z-score 常态检测）
 - ✅ 性能指纹缓存（ai_sessions / browser_history / sqlite_store 提速）
-- ✅ 覆盖率门禁 70%（pytest 429 项 + test_all 336 项）
+- ✅ 覆盖率门禁 70%（pytest 483 项，实测 79%）
 - ✅ Git 侧采纳率代理指标（`adoption.py` + `/api/adoption`：retention/reworked_ratio 粗代理，免责+折叠展示，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍）
 - ✅ 受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势，双周期解析与周期别名）
 - ✅ dashboard 纯函数外置 `dashboard_util.py` + frontend smoke / e2e 冒烟测试上线
@@ -188,7 +188,7 @@ A：分阶段推进，每个 Phase 都可以独立交付，不必一次性完成
 - 零裸 `except`；无未使用 import（`from __future__ import annotations` 为有意设计）。
 - 已有成熟缓存范式：`report._agg_cache` 按 mtime/size、`classifier.load_config` 按 mtime+TTL、`dashboard._token_cache` 短时 TTL——均为"改配置后数秒生效"的一致性做法。
 - `.gitignore` 完善：运行数据（日期文件夹 / `usage.db`）、构建产物（`build/`、`dist/`）、隐私配置（`aliases.json`、`app_groups.json`、`ai_custom.json`）均忽略。
-- 双测试体系覆盖核心逻辑：`test_all.py`（334 项无头兜底）+ `tests/`（85 项 pytest 金字塔，六层）。
+- ~~双测试体系~~ 已合并：`test_all.py` 的 47 个测试函数整体移植为 `tests/` 四个主题模块 + 共享支撑层，另有全链路 E2E 七阶段（造数→镜像→报表→API→写循环→备份恢复→安全）。
 
 ### 9.2 优化项（按优先级）
 
@@ -201,5 +201,5 @@ A：分阶段推进，每个 Phase 都可以独立交付，不必一次性完成
 ### 9.3 暂不做（记录原因）
 
 - **命名统一 `usagemon`/`usagemonitor` → `vibetrace`**：代码里仍残留（`applog` logger 名、`USAGEMON_*` 环境变量、`usagemon_hist_*` / `usagemonitor-update` 临时目录、备份文件名）。但 `updater` 过渡期仍在用旧资产名 `UsageMonitor.exe`（git 已有"过渡期双名支持"），建议待过渡完成后单独 PR，避免打断更新链路。
-- **合并双测试体系**：`test_all.py` 与 `tests/` 在文档中记为有意设计（兼容兜底 + 新金字塔），合并成本高、收益有限，暂缓。
+- ~~合并双测试体系~~ **已完成**（原判「暂缓」）：采用机械整移而非逐条改写，零断言丢失、可静态对账（check/ok 调用数守恒），成本远低于当初评估。
 - **`timeline.py`**：并非死代码，是生成 `assets/timeline_preview.html` 的独立预览工具，保留。

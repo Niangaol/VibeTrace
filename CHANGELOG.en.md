@@ -8,6 +8,21 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+> Theme: unified test system — `test_all.py` retired + deep full-chain E2E.
+
+### Tests (Unreleased)
+
+- **Two-tier tests merged**: all 47 test functions (336 assertions) of `test_all.py` mechanically ported by domain into four pytest modules — monitor scenarios / report content / dashboard API surface / insights ecosystem — plus a shared support layer (`tests/support/scenario.py`); zero assertion loss (statically verified call-count parity); `test_all.py` deleted, legacy CI step removed, pyproject omit cleaned up
+- **Full-chain E2E**: new `tests/e2e/test_full_chain.py` with seven ordered stages over one simulated data world: seeding → SQLite mirror rebuild/verify → day/month reports & CSV exports → dashboard read surface (20+ endpoints) → write cycle (groups add/delete, goals settings persistence) → backup zip → restore into a fresh root with aggregate reconciliation → security spot-checks (token auth 401/200, CSP headers, cross-origin POST rejection) → insights↔query consistency
+- **Determinism fix**: legacy wall-clock (`time.time()`) seeding anchors replaced with noon-anchored `_day_noon_ft` (removes the midnight-flake class)
+- **Coverage**: gate stays 70%, measured **79%** (was 73%); pytest total 429 → **483** (59 files)
+
+### Docs (Unreleased)
+
+- Unified test commands in both READMEs; ROADMAP flips "merge deferred" to done; TEST_WORKFLOW v1.2 records how the migration actually happened; TODO handover commands synced
+
 ## [2.8.0] - 2026-08-23
 
 > Theme: engineering wrap-up & test pyramid completion (dashboard split / frontend·e2e tests / coverage gate 70) + Git-side adoption proxy metrics + constrained query template expansion.

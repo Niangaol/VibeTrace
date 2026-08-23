@@ -219,8 +219,10 @@ Each phase can be delivered independently. Full plan: [docs/ROADMAP.md](docs/ROA
 ## Running tests
 
 ```powershell
-python test_all.py   # 268 assertions, headless and deterministic
-ruff check .         # 0 violations
+python -m pytest tests -q   # 483 test cases (unit / integration / API / security / performance / full-chain E2E)
+coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
+coverage report --fail-under=70
+ruff check .                # 0 violations
 ```
 
 CI: tests → coverage (incl. insights/updater/sqlite_store/ai_sessions) → PyInstaller build → EXE smoke → Release on tag.

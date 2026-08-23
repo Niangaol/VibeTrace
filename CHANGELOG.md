@@ -8,6 +8,21 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [未发布]
+
+> 主题：测试体系合二为一——`test_all.py` 退役 + 全链路 E2E 深化。
+
+### 测试（未发布）
+
+- **双测试体系合并**：`test_all.py`（47 个测试函数、336 项断言）按域机械整移为 pytest 四个主题模块——`tests/integration/test_monitor_scenarios.py`（15，监控/分类/跨天场景）、`tests/integration/test_report_content.py`（9，报表/浏览器历史/分组）、`tests/api/test_dashboard_surface.py`（5，仪表盘 API 面）、`tests/integration/test_insights_ecosystem.py`（18，洞察/AI 会话/更新器/sqlite）+ 共享支撑层 `tests/support/scenario.py`；断言零丢失（check/ok 调用数静态守恒），`test_all.py` 物理删除，CI 删除 legacy 步骤，pyproject omit 清理
+- **全链路 E2E**：新增 `tests/e2e/test_full_chain.py` 七阶段一条龙（同一模拟数据世界）：造数→SQLite 镜像 rebuild/verify→日报/月报/CSV 导出→仪表盘只读面 20+ 端点→写循环（分组增删 / 目标设置持久化）→备份 zip→恢复到全新根并复核聚合一致→安全抽查（口令 401/带 token 200/CSP 头/跨源 POST 拒绝）→洞察↔查询一致性对账
+- **确定性修复**：移植时把 legacy 内同款的 `time.time()` 墙钟锚造数改为正午锚 `_day_noon_ft`（消除午夜抖动类 flaky）
+- **覆盖率**：门禁维持 70%，实测 **79%**（合并前 73%）；pytest 总量 429 → **483**（59 个文件）
+
+### 文档（未发布）
+
+- `README.md` / `README.en.md` 测试命令统一为 pytest+coverage 单一口径；`docs/ROADMAP.md` 翻转「合并暂缓」结论为已完成；`docs/TEST_WORKFLOW.md` v1.2 记录迁移完成方式（机械整移 vs 原计划差异）；`TODO.md` 交接命令同步
+
 ## [2.8.0] - 2026-08-23
 
 > 主题：工程收尾与测试补位（dashboard 拆分 / frontend·e2e 测试 / 覆盖率门禁 70）+ Git 侧采纳率代理指标 + 受限查询模板扩充。
