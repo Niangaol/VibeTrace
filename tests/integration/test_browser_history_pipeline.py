@@ -17,8 +17,18 @@ import browser_history  # noqa: E402
 import classifier  # noqa: E402
 
 
-def _chrome_ft(offset_s: int = 0) -> int:
-    return int((time.time() + offset_s + 11644473600) * 1e6)
+def _day_noon_ft(day_str: str, offset_s: int = 0) -> int:
+    """以「指定日的正午」为锚的 FILETIME 微秒时间戳（测试确定性用）。
+
+    造数时间戳与查询/断言用的日界字符串必须同源且远离日界：若用 time.time()
+    锚定，测试在午夜附近运行时数据会落到 date.today() 的相邻日，日界分摊逻辑
+    把份额切走，total_duration_s 偶发不等于期望值（曾出现 174.9 vs 180.0）。
+    正午锚点距两个日界各约 12 小时裕量；day_str 由调用方先取好再传入，
+    保证造数与查询永远指向同一天。
+    """
+    year, month, day = map(int, day_str.split("-"))
+    noon = datetime.datetime(year, month, day, 12, 0)
+    return int((noon.timestamp() + offset_s + 11644473600) * 1e6)
 
 
 def test_chromium_collect_and_report(tmp_path):
@@ -34,14 +44,15 @@ def test_chromium_collect_and_report(tmp_path):
     conn.execute("INSERT INTO urls (url, title) VALUES (?, ?)", ("https://www.bilibili.com/video/av1", "bilibili 视频"))
     conn.execute("INSERT INTO urls (url, title) VALUES (?, ?)", ("https://github.com/user/repo", "GitHub 代码"))
     conn.execute("INSERT INTO urls (url, title) VALUES (?, ?)", ("https://example.com/login?password=123", "敏感页"))
-    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (1, ?, 120000000)", (_chrome_ft(-120),))
-    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (2, ?, 60000000)", (_chrome_ft(-60),))
-    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (3, ?, 0)", (_chrome_ft(0),))
+    # 先取日字符串再造数：时间戳锚定该日正午，与查询/断言单一来源（防午夜抖动）
+    cfg = classifier.load_config()
+    today = datetime.date.today().isoformat()
+    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (1, ?, 120000000)", (_day_noon_ft(today, -120),))
+    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (2, ?, 60000000)", (_day_noon_ft(today, -60),))
+    conn.execute("INSERT INTO visits (url, visit_time, visit_duration) VALUES (3, ?, 0)", (_day_noon_ft(today, 0),))
     conn.commit()
     conn.close()
 
-    cfg = classifier.load_config()
-    today = datetime.date.today().isoformat()
     data = browser_history.collect(today, tmp, cfg, db_paths=[db])
     assert data["count"] == 3
     by_url = {v["url"].split("?")[0]: v for v in data["visits"]}

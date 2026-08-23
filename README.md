@@ -104,7 +104,7 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 ### Reports & dashboard
 
 - 日报、周报、月报（Markdown + CSV）
-- 本地网页仪表盘，十个视图：概览 / 趋势 / 日报 / 周报 / 月报 / 会话 / 日志 / 分组 / 洞察 / 设置
+- 本地网页仪表盘，十三个视图：概览 / 趋势 / 日报 / 周报 / 月报 / 会话 / 时间轴 / 成长 / 对比 / 日志 / 分组 / 洞察 / 设置
 - 数据导出（CSV / JSON）、备份 / 恢复
 
 ### Insights & AI
@@ -115,6 +115,8 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 - AI 会话深度统计：读取 opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH 本地会话文件（各工具支持程度与扩展方法见 [docs/HARNESSES.md](docs/HARNESSES.md)）；Token 优先读会话内真实 usage 字段，缺失时按字符类别加权估算（`token_estimation_mode: weighted|simple`）
 - 告警闭环（v2.7）：AI 成本预算接近/超支、连续工作休息提醒——托盘气泡主动通知，阈值/冷却可配
 - 每日目标（v2.7 · 可选）：总活跃/编码时长目标 + 连续达成天数，概览页进度面板，默认关闭
+- 采纳率代理（v2.8 · 仅参考）：Git 侧 retention / 返工率粗代理（`/api/adoption`），洞察页折叠 + 灰色降权 + 强制免责声明，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍
+- 受限查询扩充（v2.8）：新增「今日产出 vs 昨日」「本周专注度最佳日」「成本趋势」模板，支持双周期对比与周期别名
 
 ### Adaptation
 
@@ -231,7 +233,7 @@ AI 编程深度追踪规划：
 
 
 ```powershell
-python test_all.py   # 268 项断言，无头确定性
+python test_all.py   # 336 项断言，无头确定性
 ruff check .         # 0 违规
 ```
 

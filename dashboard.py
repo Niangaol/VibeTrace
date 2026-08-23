@@ -463,8 +463,12 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header(k, v)
 
     def _send_json(self, obj: dict, status: int = 200) -> None:
-        """发送 JSON 响应（带统一隐私/安全头）。"""
-        body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
+        """发送 JSON 响应（带统一隐私/安全头）。
+
+        紧凑分隔符：API 响应体普遍数十 KB 起，去掉默认的 `, `/`: ` 空格可减小
+        10–20% 体积并加快序列化；JSON 语义不变，前端 JSON.parse 无感。
+        """
+        body = json.dumps(obj, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))

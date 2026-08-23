@@ -104,7 +104,7 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 ### Reports & dashboard
 
 - Daily, weekly, monthly reports (Markdown + CSV)
-- Local web dashboard with ten views: Overview / Trends / Report / Week / Month / Sessions / Logs / Groups / Insights / Settings
+- Local web dashboard with thirteen views: Overview / Trends / Report / Week / Month / Sessions / Timeline / Growth / Compare / Logs / Groups / Insights / Settings
 - Export (CSV / JSON), backup / restore
 
 ### Insights & AI
@@ -114,6 +114,8 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 - AI session deep stats: reads local session files from opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH (per-tool support matrix and extension guide: [docs/HARNESSES.md](docs/HARNESSES.md), Chinese)
 - Alert loop (v2.7): AI cost budget warn/exceed + continuous-work rest reminders via tray balloon, configurable thresholds/cooldown
 - Daily goals (v2.7 · optional): total active / coding time targets with streak counter, overview progress panel, off by default
+- Adoption proxy (v2.8 · reference only): Git-side retention / rework rough proxies (`/api/adoption`), shown collapsed & greyed-out with a mandatory disclaimer; confidence never "high"; AI-side per-file attribution cut per the spike conclusion
+- Constrained queries expanded (v2.8): new templates for period-over-period output comparison, best-focus day, and cost trend, with dual-period parsing and period aliases
 
 ### Adaptation
 
