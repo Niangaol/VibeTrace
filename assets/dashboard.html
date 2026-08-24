@@ -22,6 +22,11 @@
     --shadow-1:0 1px 2px rgba(0,0,0,.16),0 1px 3px rgba(0,0,0,.10);
     --shadow-2:0 6px 18px rgba(0,0,0,.22),0 2px 6px rgba(0,0,0,.14);
     --shadow-3:0 16px 36px rgba(0,0,0,.30);
+    /* 四类精修新增令牌（暗色）：分类色板 / 语义柔色 / 金色渐变 / 表格斑马纹 */
+    --cat-1:#e07a3f; --cat-2:#3db8b0; --cat-3:#4a7de0; --cat-4:#9a6ae0; --cat-5:#5aa05a; --cat-6:#8a8f98;
+    --ok-soft:rgba(127,176,105,.12); --warn-soft:rgba(217,164,65,.12); --danger-soft:rgba(224,83,61,.12);
+    --accent-grad:linear-gradient(135deg,#e0a53c,#f0c15e);
+    --row-zebra:rgba(255,255,255,.045);
     --ease:cubic-bezier(.22,.61,.36,1); --ease-out:cubic-bezier(.16,1,.3,1);
     --ease-in:cubic-bezier(.4,0,1,1); --ease-spring:cubic-bezier(.34,1.56,.64,1);
     --transition-fast:140ms var(--ease); --transition-base:220ms var(--ease); --transition-slow:360ms var(--ease);
@@ -40,6 +45,11 @@
     --shadow-1:0 1px 2px rgba(15,23,42,.08),0 1px 3px rgba(15,23,42,.06);
     --shadow-2:0 6px 16px rgba(15,23,42,.10),0 2px 6px rgba(15,23,42,.07);
     --shadow-3:0 16px 34px rgba(15,23,42,.14);
+    /* 四类精修新增令牌（亮色）：分类色板 / 语义柔色 / 金色渐变 / 表格斑马纹 */
+    --cat-1:#c96a2e; --cat-2:#2e9a94; --cat-3:#3563c4; --cat-4:#7f51c4; --cat-5:#4a8a4a; --cat-6:#7a7f88;
+    --ok-soft:rgba(62,119,54,.10); --warn-soft:rgba(150,103,15,.10); --danger-soft:rgba(196,66,44,.10);
+    --accent-grad:linear-gradient(135deg,#b47a1c,#d29a3a);
+    --row-zebra:rgba(20,25,36,.045);
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{height:100%}
@@ -76,7 +86,8 @@
   .brand span{display:block;font-size:11px;color:var(--faint);margin-top:1px}
   .nav{padding:10px 8px;flex:1;overflow-y:auto;position:relative;z-index:0}
   .nav-indicator{position:absolute;left:8px;right:8px;top:0;height:0;border-radius:999px;
-    background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--border-strong),0 2px 8px rgba(0,0,0,.10);
+    background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--border-strong),0 2px 8px rgba(0,0,0,.10),
+      0 0 16px rgba(224,165,60,.20);
     opacity:0;transition:transform .26s var(--ease-spring),height .26s var(--ease-spring),opacity .2s var(--ease);
     pointer-events:none;z-index:0}
   .nav-item{display:flex;align-items:center;gap:10px;padding:8px 10px;margin:2px 0;
@@ -84,7 +95,7 @@
     transition:background .18s var(--ease),color .18s var(--ease)}
   .nav-item svg{flex-shrink:0;opacity:.85}
   .nav-item:hover{background:var(--surface-2);color:var(--text)}
-  .nav-item.active{color:var(--text);background:transparent}
+  .nav-item.active{color:var(--text);background:transparent;text-shadow:0 0 14px rgba(224,165,60,.35)}
   .nav-item.active::before{content:"";position:absolute;left:-8px;top:20%;bottom:20%;width:3px;
     border-radius:2px;background:var(--accent)}
   .side-foot{padding:14px 16px;border-top:1px solid var(--border);font-size:11px;color:var(--faint)}
@@ -144,10 +155,10 @@
   button.btn .ripple{position:absolute;border-radius:50%;background:currentColor;opacity:.16;
     transform:scale(0);animation:btnRipple .5s var(--ease) forwards;pointer-events:none}
   button.btn:focus-visible{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-  button.btn.primary{background:var(--accent);border-color:var(--accent);color:#141008;font-weight:700;
+  button.btn.primary{background:var(--accent-grad);border-color:var(--accent);color:#141008;font-weight:700;
     box-shadow:0 1px 10px rgba(224,165,60,.25)}
   html[data-theme="light"] button.btn.primary{color:#fff}
-  button.btn.primary:hover{background:#eab356;box-shadow:0 2px 12px rgba(224,165,60,.32)}
+  button.btn.primary:hover{background:linear-gradient(135deg,#eab356,#f5cf7f);box-shadow:0 2px 12px rgba(224,165,60,.32)}
   /* 小尺寸输入（表格内/分组页） */
   .tbl input, .tbl select{padding:6px 9px;min-height:32px;font-size:12.5px;border-radius:6px}
 
@@ -199,7 +210,8 @@
     transition:border-color .18s var(--ease),box-shadow .18s var(--ease),transform .18s var(--ease)}
   .panel:hover{border-color:var(--border-strong);box-shadow:var(--shadow-2)}
   .panel h2{font-size:12px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;
-    color:var(--faint);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
+    color:var(--faint);margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;
+    padding-left:9px;border-left:3px solid var(--accent);border-radius:0}
   .panel h2 .hint{font-size:11px;text-transform:none;letter-spacing:0;font-weight:400}
 
   /* ---------- 统计行（类别/应用条） ---------- */
@@ -208,30 +220,70 @@
   .stat-row .top .name{color:var(--text)}
   .stat-row .top .val{color:var(--dim);font-variant-numeric:tabular-nums}
   .bar{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden}
-  .bar > i{display:block;height:100%;border-radius:3px;background:var(--accent);
+  .bar > i{display:block;height:100%;border-radius:3px;background:var(--accent-grad);
     width:0;transition:width .7s var(--ease);animation:barGrow .65s var(--ease) both}
   .mdbar i{animation:barGrow .65s var(--ease) both}
   @keyframes barGrow{from{width:0}}
 
   /* ---------- 表格 ---------- */
-  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:var(--radius)}
+  .tbl-wrap{overflow:auto;border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow-1)}
   table.tbl{width:100%;border-collapse:collapse;font-size:12.5px;min-width:640px}
-  .tbl th{text-align:left;padding:8px 10px;color:var(--faint);font-weight:500;font-size:11px;
-    text-transform:uppercase;letter-spacing:.5px;background:var(--surface-2);
-    border-bottom:1px solid var(--border);position:sticky;top:0;white-space:nowrap}
+  .tbl th{text-align:left;padding:10px 12px;color:var(--faint);font-weight:600;font-size:11px;
+    text-transform:uppercase;letter-spacing:.9px;background:linear-gradient(180deg,var(--surface-2),var(--surface));
+    border-bottom:2px solid var(--border-strong);position:sticky;top:0;white-space:nowrap;z-index:1}
   .tbl td{padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
   .tbl tbody tr{transition:background .12s var(--ease)}
-  .tbl tbody tr:hover{background:var(--surface-2)}
+  .tbl tbody tr:nth-child(even){background:var(--row-zebra)}  /* 斑马纹：半透明中性，近似 surface-2 半透明 */
+  .tbl tbody tr:hover{background:var(--surface-2)}  /* 不透明 hover 盖过斑马纹 */
   .tbl tbody tr:hover td:first-child{box-shadow:inset 3px 0 0 var(--accent)}
-  .tbl td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+  .tbl td.num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+  .tbl td.num.left{text-align:left}
   .tbl td.mono{font-family:var(--mono);font-size:11.5px}
   .tag{display:inline-block;padding:1px 7px;border-radius:4px;font-size:11px;margin-right:5px;
     background:var(--surface-3);border:1px solid var(--border-strong);color:var(--dim);white-space:nowrap}
-  .tag.ai{color:var(--tag-ai-text);border-color:var(--tag-ai-border);background:var(--tag-ai-bg)}
-  .tag.conv{color:var(--ok);border-color:rgba(127,176,105,.45);background:rgba(127,176,105,.10)}
+  .tag.ai{color:var(--accent);border-color:var(--accent-soft);background:var(--accent-soft)}
+  .tag.conv{color:var(--ok);border-color:rgba(127,176,105,.45);background:var(--ok-soft)}
   .tag.commit{color:var(--md-a);border-color:rgba(143,184,255,.45);background:rgba(143,184,255,.10)}
+  .tag.warn{color:var(--warn);border-color:rgba(217,164,65,.45);background:var(--warn-soft)}
+  .tag.danger{color:var(--danger);border-color:rgba(224,83,61,.45);background:var(--danger-soft)}
+  /* 分类色标签：--cat-1..6（橙/青/蓝/紫/绿/灰） */
+  .tag.c1{color:var(--cat-1);border-color:rgba(224,122,63,.45);background:rgba(224,122,63,.10)}
+  .tag.c2{color:var(--cat-2);border-color:rgba(61,184,176,.45);background:rgba(61,184,176,.10)}
+  .tag.c3{color:var(--cat-3);border-color:rgba(74,125,224,.45);background:rgba(74,125,224,.10)}
+  .tag.c4{color:var(--cat-4);border-color:rgba(154,106,224,.45);background:rgba(154,106,224,.10)}
+  .tag.c5{color:var(--cat-5);border-color:rgba(90,160,90,.45);background:rgba(90,160,90,.10)}
+  .tag.c6{color:var(--cat-6);border-color:rgba(138,143,152,.45);background:rgba(138,143,152,.10)}
   .url-cell{font-family:var(--mono);font-size:11px;color:var(--url);max-width:280px;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+
+  /* ---------- 应用图标（确定性彩色首字母/品牌映射，零依赖） ---------- */
+  .app-cell{display:inline-flex;align-items:center;gap:7px;max-width:100%;vertical-align:middle}
+  .app-cell .app-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .app-ico{display:inline-flex;align-items:center;justify-content:center;flex:none;
+    width:22px;height:22px;border-radius:6px;color:#fff;font-size:11px;font-weight:700;line-height:1;
+    text-transform:uppercase;text-shadow:0 1px 1px rgba(0,0,0,.25);
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.16),inset 0 -2px 4px rgba(0,0,0,.16);
+    transition:transform .15s var(--ease)}
+  .app-ico:hover{transform:scale(1.12)}
+
+  /* ---------- 价格手风琴（按厂商分组折叠） ---------- */
+  .price-vendor{margin-bottom:8px;border:1px solid var(--border);border-radius:8px;overflow:hidden;background:var(--surface)}
+  .price-vhead{display:flex;align-items:center;gap:8px;width:100%;padding:8px 12px;cursor:pointer;
+    background:var(--surface-2);border:none;text-align:left;font:inherit;color:var(--text)}
+  .price-vhead:hover{background:var(--surface-3)}
+  .pv-dot{width:10px;height:10px;border-radius:50%;flex:none}
+  .pv-name{font-size:12.5px;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pv-count{font-size:10.5px;color:var(--dim);background:var(--surface-3);border:1px solid var(--border-strong);
+    border-radius:999px;padding:0 7px;line-height:16px}
+  .pv-arrow{color:var(--faint);font-size:11px;transition:transform .18s var(--ease)}
+  .price-vhead[aria-expanded="true"] .pv-arrow{transform:rotate(180deg)}
+  .price-vbody{display:grid;grid-template-rows:0fr;transition:grid-template-rows .24s var(--ease)}
+  .price-vbody.pv-body-open{grid-template-rows:1fr}  /* 展开动画独立类，不触碰 .reveal-init */
+  .price-vbody > .pv-rows{overflow:hidden;min-height:0;padding:0 12px;transition:padding .24s var(--ease)}
+  .price-vbody.pv-body-open > .pv-rows{padding:10px 12px}
+  .pv-rows{display:grid;gap:8px}
+  .pv-tools{display:flex;justify-content:flex-end;margin-bottom:2px}
+  .pv-tools .btn{padding:3px 10px;font-size:11.5px;min-height:0}
 
   /* ---------- 滚动显现 / 图表扫光 / 告警脉冲 ---------- */
   .reveal-init{opacity:0;transform:translateY(9px)}
@@ -273,11 +325,12 @@
   .md h2{font-size:14px;color:var(--md-h2);margin:20px 0 10px;letter-spacing:.3px}
   .md table{border-collapse:collapse;width:100%;font-size:12.5px;margin:8px 0 16px}
   .md th,.md td{border:1px solid var(--border);padding:6px 10px;text-align:left}
-  .md th{background:var(--surface-2);color:var(--faint);font-weight:500}
+  .md th{background:linear-gradient(180deg,var(--surface-2),var(--surface));color:var(--faint);font-weight:600;letter-spacing:.5px}
+  .md tbody tr:nth-child(even){background:var(--row-zebra)}  /* collapse 下同步斑马纹，不强行圆角 */
   .md a{color:var(--md-a);text-decoration:none}
   .md blockquote{color:var(--dim);border-left:3px solid var(--border-strong);padding-left:10px;margin:8px 0}
   .mdbar{height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden;min-width:60px}
-  .mdbar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+  .mdbar i{display:block;height:100%;background:var(--accent-grad);border-radius:3px}
   .md p{font-size:12.5px;margin:6px 0}
   .md li{font-size:12.5px;margin:3px 0 3px 18px}
 
@@ -946,11 +999,57 @@ function loadingBox(text){
     '<div class="sk" style="height:8px;width:52%;margin:0 auto 14px;border-radius:4px"></div>' +
     '<div style="color:var(--dim)">' + esc(text) + '</div></div>';
 }
-function statRows(data, fmt){
+/* ---------- 应用图标（确定性彩色首字母/品牌映射，零依赖） ---------- */
+const APP_ICONS = {
+  chrome:{c:"#eab308",t:"C"}, msedge:{c:"#0f7bff",t:"e"}, edge:{c:"#0f7bff",t:"e"},
+  firefox:{c:"#ff7139",t:"f"}, code:{c:"#2563eb",t:"<"}, vscode:{c:"#2563eb",t:"<"},
+  "visual studio code":{c:"#2563eb",t:"<"},
+  wechat:{c:"#07c160",t:"微"}, weixin:{c:"#07c160",t:"微"}, qq:{c:"#12b7f5",t:"Q"},
+  dingtalk:{c:"#0089ff",t:"钉"}, ding:{c:"#0089ff",t:"钉"}, feishu:{c:"#3370ff",t:"飞"}, lark:{c:"#3370ff",t:"飞"},
+  notion:{c:"#3a3f47",t:"N"}, slack:{c:"#4a154b",t:"S"},
+  terminal:{c:"#1f2937",t:"▮"}, cmd:{c:"#1f2937",t:"▮"}, powershell:{c:"#012456",t:"PS"},
+  explorer:{c:"#0078d4",t:"e"}, word:{c:"#185abd",t:"W"}, excel:{c:"#217346",t:"X"},
+  powerpoint:{c:"#d24726",t:"P"}, outlook:{c:"#0f6cbd",t:"O"},
+  spotify:{c:"#1db954",t:"S"}, telegram:{c:"#229ed9",t:"T"}, discord:{c:"#5865f2",t:"D"},
+  steam:{c:"#1b2838",t:"S"}, notepad:{c:"#64748b",t:"N"}, paint:{c:"#3fa9f5",t:"P"},
+  calculator:{c:"#3a3f47",t:"c"}, cal:{c:"#3a3f47",t:"c"}
+};
+function appIconHtml(name){
+  const raw = String(name == null ? "" : name);
+  const s = raw.toLowerCase().replace(/\.exe$/i, "").split(/[\\/]/).pop();
+  let hit = APP_ICONS[s] || null;
+  if(!hit){
+    for(const k in APP_ICONS){
+      if(APP_ICONS[k] && s.includes(k)){ hit = APP_ICONS[k]; break; }
+    }
+  }
+  let c, ch;
+  if(hit){ c = hit.c; ch = hit.t; }
+  else{
+    let h = 0;
+    for(let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) >>> 0;   // 稳定哈希 → 色相
+    c = "hsl(" + (h % 360) + ",55%,46%)";
+    const first = Array.from(raw.trim())[0] || "?";                    // 首字母；中文取首字
+    ch = /[a-z]/i.test(first) ? first.toUpperCase() : first;
+  }
+  return '<span class="app-ico" style="background:'+c+'" aria-hidden="true">'+esc(ch)+'</span>';
+}
+function catIndex(name){   // 稳定哈希 → 1..6，用于 .tag.c1..c6 分类色
+  const s = String(name == null ? "" : name);
+  let h = 0;
+  for(let i=0;i<s.length;i++) h = (h*31 + s.charCodeAt(i)) >>> 0;
+  return (h % 6) + 1;
+}
+function statRows(data, fmt, opts){
+  opts = opts || {};
+  const icon = !!opts.icon;
   const max = Math.max(1, ...Object.values(data));
   return Object.entries(data).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
     const pct = Math.max(2, Math.round(v/max*100));
-    return '<div class="stat-row"><div class="top"><span class="name">' + esc(k) + '</span>' +
+    const nameCell = icon
+      ? '<span class="app-cell">'+appIconHtml(k)+'<span class="app-name">'+esc(k)+'</span></span>'
+      : esc(k);
+    return '<div class="stat-row"><div class="top"><span class="name">' + nameCell + '</span>' +
       '<span class="val">' + fmt(v) + '</span></div><div class="bar"><i style="width:' + pct + '%"></i></div></div>';
   }).join("") || '<div class="empty">（无数据）</div>';
 }
@@ -1245,12 +1344,12 @@ async function loadOverview(){
     countUp($("#cUrl"), (u.total_duration_s||0)*1000, fmtMs);
   }catch(e){ $("#cUrl").textContent = "-"; }
   $("#ovCats").innerHTML = skeleton(6);
-  $("#ovCats").innerHTML = statRows(a.by_category, fmtMs);
-  $("#ovApps").innerHTML = statRows(a.by_app, fmtMs);
+  $("#ovCats").innerHTML = statRows(a.by_category, fmtMs);   // 类别：不启用图标
+  $("#ovApps").innerHTML = statRows(a.by_app, fmtMs, {icon:true});
   const aiBlock = '<div style="margin-bottom:16px"><b style="font-size:12px;color:var(--dim);letter-spacing:.4px">AI 工具</b>' +
-    (Object.keys(a.by_ai||{}).length ? statRows(a.by_ai, fmtMs) : '<div class="empty">（无 AI 工具记录）</div>') + '</div>';
+    (Object.keys(a.by_ai||{}).length ? statRows(a.by_ai, fmtMs, {icon:true}) : '<div class="empty">（无 AI 工具记录）</div>') + '</div>';
   const ctBlock = '<div><b style="font-size:12px;color:var(--dim);letter-spacing:.4px">联系人</b>' +
-    ((a.by_contact && Object.keys(a.by_contact).length) ? statRows(Object.fromEntries(Object.entries(a.by_contact).flatMap(([app,cs])=>Object.entries(cs).map(([c,v])=>[app+"/"+c, v]))), fmtMs) : '<div class="empty">（无联系人记录）</div>') + '</div>';
+    ((a.by_contact && Object.keys(a.by_contact).length) ? statRows(Object.fromEntries(Object.entries(a.by_contact).flatMap(([app,cs])=>Object.entries(cs).map(([c,v])=>[app+"/"+c, v]))), fmtMs, {icon:true}) : '<div class="empty">（无联系人记录）</div>') + '</div>';
   $("#ovMisc").innerHTML = aiBlock + ctBlock;
   // AI 会话深度（始终开启，固定面板）
   $("#ovAiSessions").innerHTML = '<div class="empty">加载中…</div>';
@@ -1732,6 +1831,25 @@ function wireAiSettings(){
   if(ollamaBtn) ollamaBtn.onclick = fetchOllamaModels;
 }
 
+/* ---------- 价格按厂商分组（零后端，JS 前缀映射；展示顺序固定 6 组） ---------- */
+const PRICE_VENDORS = [
+  {id:"anthropic", name:"Anthropic", c:"var(--cat-2)"},
+  {id:"openai",    name:"OpenAI",    c:"var(--cat-1)"},
+  {id:"deepseek",  name:"DeepSeek",  c:"var(--cat-3)"},
+  {id:"google",    name:"Google",    c:"var(--cat-4)"},
+  {id:"cn",        name:"国内模型",   c:"var(--cat-5)"},
+  {id:"other",     name:"其他",       c:"var(--cat-6)"}
+];
+function priceVendorOf(k){
+  const s = String(k || "").toLowerCase();
+  if(s.startsWith("claude")) return "anthropic";
+  if(s.startsWith("gpt") || /^o\d/.test(s) || s.startsWith("codex")) return "openai";
+  if(s.startsWith("deepseek")) return "deepseek";
+  if(s.startsWith("gemini")) return "google";
+  if(/^(qwen|glm|chatglm|kimi|moonshot|doubao|ernie|hunyuan)([._/-]|$)/.test(s)) return "cn";
+  return "other";
+}
+
 function wirePricing(){
   const list = $("#priceList");
   const tip = $("#priceTip");
@@ -1758,27 +1876,71 @@ function wirePricing(){
       render();
     }catch(e){ tip.textContent = "价格加载失败：" + e.message; }
   }
+  function rowHtml(k){
+    // ⚠️ 红线：.price-row 内部结构与类名逐字保留（.pm/.pm-name/.pi/.po、data-key、
+    //    data-del/data-reset、●/＋ 标记）——collectOverrides() 与 list.onclick 委托零改动可用
+    const isC = Object.prototype.hasOwnProperty.call(custom, k);
+    const v = disp(k);
+    const inV = (v[0] != null ? v[0] : 0), outV = (v[1] != null ? v[1] : 0);
+    const nameCell = (isC || !builtin[k])
+      ? '<input class="pm" data-key="'+esc(k)+'" value="'+esc(k)+'" style="min-width:0">'  // 已覆盖/新增：模型名可编辑
+      : '<span class="pm-name" data-key="'+esc(k)+'">'+esc(k)+'</span>';            // 内置：模型名只读
+    const act = (isC || !builtin[k])
+      ? '<button class="btn" data-del="'+esc(k)+'">删除</button>'
+      : '<button class="btn" data-reset="'+esc(k)+'">重置</button>';
+    const tag = isC ? '<span style="color:var(--accent)" title="已覆盖">●</span> '
+                    : (builtin[k] ? '' : '<span style="color:var(--ok)" title="新增">＋</span> ');
+    return '<div class="price-row" style="display:grid;grid-template-columns:1fr 120px 120px auto;gap:8px;align-items:center">'
+      + '<div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tag+nameCell+'</div>'
+      + '<input class="pi" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(inV))+'" style="min-width:0">'  // 输入价 $/M
+      + '<input class="po" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(outV))+'" style="min-width:0">' // 输出价 $/M
+      + act + '</div>';
+  }
+  function updateToggleLabel(){
+    const toggle = $("#pvToggleAll");
+    if(!toggle) return;
+    const heads = list.querySelectorAll(".price-vhead");
+    const allOpen = heads.length > 0 && [...heads].every(h => h.getAttribute("aria-expanded") === "true");
+    toggle.textContent = allOpen ? "收起全部" : "全部展开";
+  }
   function render(){
     const keys = mergedKeys();
     if(!keys.length){ list.innerHTML = '<div class="empty">（无内置价目）</div>'; return; }
-    list.innerHTML = keys.map(k => {
-      const isC = Object.prototype.hasOwnProperty.call(custom, k);
-      const v = disp(k);
-      const inV = (v[0] != null ? v[0] : 0), outV = (v[1] != null ? v[1] : 0);
-      const nameCell = (isC || !builtin[k])
-        ? '<input class="pm" data-key="'+esc(k)+'" value="'+esc(k)+'" style="min-width:0">'  // 已覆盖/新增：模型名可编辑
-        : '<span class="pm-name" data-key="'+esc(k)+'">'+esc(k)+'</span>';            // 内置：模型名只读
-      const act = (isC || !builtin[k])
-        ? '<button class="btn" data-del="'+esc(k)+'">删除</button>'
-        : '<button class="btn" data-reset="'+esc(k)+'">重置</button>';
-      const tag = isC ? '<span style="color:var(--accent)" title="已覆盖">●</span> '
-                      : (builtin[k] ? '' : '<span style="color:var(--ok)" title="新增">＋</span> ');
-      return '<div class="price-row" style="display:grid;grid-template-columns:1fr 120px 120px auto;gap:8px;align-items:center">'
-        + '<div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tag+nameCell+'</div>'
-        + '<input class="pi" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(inV))+'" style="min-width:0">'  // 输入价 $/M
-        + '<input class="po" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(outV))+'" style="min-width:0">' // 输出价 $/M
-        + act + '</div>';
-    }).join("");
+    // 记住已展开的厂商组（render 后保持，多开互不影响）
+    const openVendors = new Set();
+    list.querySelectorAll(".price-vhead[aria-expanded='true']").forEach(h => openVendors.add(h.dataset.vendor));
+    const groups = {};
+    for(const k of keys){ const vid = priceVendorOf(k); (groups[vid] = groups[vid] || []).push(k); }
+    list.innerHTML =
+      '<div class="pv-tools"><button class="btn" id="pvToggleAll" type="button">全部展开</button></div>' +
+      PRICE_VENDORS.filter(v => groups[v.id]).map(v => {
+        const ks = groups[v.id];
+        const isOpen = openVendors.has(v.id);
+        return '<div class="price-vendor" data-vendor="'+v.id+'">' +
+          '<button class="price-vhead" type="button" data-vendor="'+v.id+'" aria-expanded="'+(isOpen?'true':'false')+'">' +
+            '<span class="pv-dot" style="background:'+v.c+'"></span>' +
+            '<span class="pv-name">'+esc(v.name)+'</span>' +
+            '<span class="pv-count">'+ks.length+'</span>' +
+            '<span class="pv-arrow">▾</span>' +
+          '</button>' +
+          '<div class="price-vbody'+(isOpen?' pv-body-open':'')+'">' +
+            '<div class="pv-rows">'+ks.map(rowHtml).join("")+'</div>' +
+          '</div></div>';
+      }).join("");
+    const toggle = $("#pvToggleAll");
+    if(toggle){
+      toggle.onclick = () => {
+        const allOpen = list.querySelectorAll(".price-vhead").length > 0 &&
+          [...list.querySelectorAll(".price-vhead")].every(h => h.getAttribute("aria-expanded") === "true");
+        list.querySelectorAll(".price-vhead").forEach(h => {
+          const next = !allOpen;
+          h.setAttribute("aria-expanded", next ? "true" : "false");
+          h.nextElementSibling.classList.toggle("pv-body-open", next);
+        });
+        updateToggleLabel();
+      };
+    }
+    updateToggleLabel();
   }
   // 收集覆盖：仅写与内置不同的项（保持 ai_pricing.json 为纯 diff 层）
   function collectOverrides(){
@@ -1802,12 +1964,33 @@ function wirePricing(){
     custom[m] = [Number($("#priceIn").value||0), Number($("#priceOut").value||0)];
     $("#priceModel").value = ""; $("#priceIn").value = ""; $("#priceOut").value = "";
     note.textContent = ""; render();
+    // 添加后：自动展开所在厂商组 + 滚动到该行（block:nearest 不打扰整体滚动）
+    const vid = priceVendorOf(m);
+    const head = list.querySelector('.price-vhead[data-vendor="'+vid+'"]');
+    if(head){
+      head.setAttribute("aria-expanded", "true");
+      head.nextElementSibling.classList.add("pv-body-open");
+      let row = null;
+      list.querySelectorAll(".price-row").forEach(r => {
+        const el = r.querySelector(".pm, .pm-name");
+        if(el && el.dataset.key === m) row = r;
+      });
+      (row || head).scrollIntoView({block:"nearest"});
+      updateToggleLabel();
+    }
   };
   list.onclick = e => {
     const del = e.target.closest("[data-del]");
     if(del){ delete custom[del.dataset.del]; render(); return; }
     const rs = e.target.closest("[data-reset]");
     if(rs){ delete custom[rs.dataset.reset]; render(); return; }
+    const head = e.target.closest(".price-vhead");
+    if(head){
+      const open = head.getAttribute("aria-expanded") === "true";
+      head.setAttribute("aria-expanded", open ? "false" : "true");
+      head.nextElementSibling.classList.toggle("pv-body-open", !open);
+      updateToggleLabel();
+    }
   };
   $("#priceSave").onclick = async () => {
     const ov = collectOverrides();
@@ -1845,9 +2028,10 @@ function renderSessions(sessions, agg){
     if(s.subcategory) tags.push('<span class="tag sub">'+esc(s.subcategory)+'</span>');
     if(s.window_state && s.window_state !== "normal") tags.push('<span class="tag ws">'+({fullscreen:"全屏",maximized:"最大化"}[s.window_state]||s.window_state)+'</span>');
     if(s.url) tags.push(s.url === "[已隐藏]" ? '<span class="tag">URL已隐藏</span>' : '<span class="url-cell" title="'+esc(s.url)+'">'+esc(s.url.split("?")[0].slice(0,56))+'</span>');
-    return "<tr><td class='mono num'>"+(s.start||"").slice(11,19)+"</td>" +
+    const appName = s.app || s.exe || "";
+    return "<tr><td class='mono num left'>"+(s.start||"").slice(11,19)+"</td>" +
       "<td class='num'>"+fmtCompact(s.duration_ms||0)+"</td>" +
-      "<td>"+esc(s.app||s.exe||"")+"</td>" +
+      "<td>" + (appName ? '<span class="app-cell">'+appIconHtml(s.exe||s.app)+'<span class="app-name">'+esc(appName)+'</span></span>' : '') + "</td>" +
       "<td class='mono'>"+esc(s.title||"")+"</td>" +
       "<td>"+esc(s.category||"")+"</td>" +
       "<td>"+tags.join("")+"</td></tr>";
@@ -1900,7 +2084,7 @@ function renderTimeline(events, summary){
         ' 变更 '+((d.added||0)+(d.deleted||0)) + ' 行' +
         (d.author ? ' · '+esc(d.author) : '');
     }
-    return '<tr><td class="mono num">'+esc(e.time||"")+'</td>' +
+    return '<tr><td class="mono num left">'+esc(e.time||"")+'</td>' +
       '<td>'+tlTag(type)+'</td>' +
       '<td>'+esc(e.title||"")+'</td>' +
       '<td>'+(detailHtml||'-')+'</td></tr>';
@@ -2210,9 +2394,9 @@ function renderGroups(){
     const opts = ['<option value="">自动分类</option>'].concat(
       d.categories.map(c=>'<option value="'+esc(c)+'"'+(a.overridden && a.category===c ? " selected" : "")+'>'+esc(c)+'</option>')
     ).join("");
-    return "<tr><td>"+esc(a.app)+"<span class='url-cell' style='margin-left:8px'>"+esc(a.exe)+"</span></td>"+
+    return "<tr><td><span class='app-cell'>"+appIconHtml(a.exe || a.app)+"<span class='app-name'>"+esc(a.app)+"</span></span><span class='url-cell' style='margin-left:8px'>"+esc(a.exe)+"</span></td>"+
       "<td><input class='grp-name' data-exe='"+esc(a.exe)+"' value='"+esc(a.app)+"' placeholder='默认' style='width:140px'></td>"+
-      "<td>"+(a.overridden ? '<span class="tag ai">'+esc(a.category)+'</span>' : '<span style="color:var(--dim)">'+esc(a.category)+'</span>')+"</td>"+
+      "<td>"+(a.overridden ? '<span class="tag c'+catIndex(a.category)+'">'+esc(a.category)+'</span>' : '<span style="color:var(--dim)">'+esc(a.category)+'</span>')+"</td>"+
       "<td><select data-exe='"+esc(a.exe)+"'>"+opts+"</select></td></tr>";
   }).join("") || '<tr><td colspan="4" class="empty">无匹配应用</td></tr>';
   $$("#grpBody select").forEach(sel=>{
