@@ -233,7 +233,7 @@ AI 编程深度追踪规划：
 
 
 ```powershell
-python -m pytest tests -q   # 483 项用例（单测/集成/API/安全/性能/E2E 全链路）
+python -m pytest tests -q   # 约499项用例（单测/集成/API/安全/性能/E2E 全链路）
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 违规

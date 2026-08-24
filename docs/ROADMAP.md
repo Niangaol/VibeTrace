@@ -1,6 +1,6 @@
 # VibeTrace 项目规划文档：AI 编程深度追踪
 
-> **文档版本**：v1.2 | **更新日期**：2026-08-23 | **状态**：已落地至 v2.8.2（2026-08-23）
+> **文档版本**：v1.3 | **更新日期**：2026-08-23 | **状态**：已落地至 v2.8.2（批次二已入 master 待发）
 
 ## 一、项目定位与愿景
 
@@ -35,7 +35,7 @@
 - ✅ 可选 SQLite 后端与一致性校验（JSONL 仍为原始事实源）
 - ✅ 纯 Python + ctypes，零第三方运行时依赖
 - ✅ 打包为独立 exe，支持安装/卸载、应用内更新
-- ✅ 统一测试体系：pytest 483 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役）
+- ✅ 统一测试体系：pytest ~499 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役；新增并发锤/配置流/暂停退出等回归钉扎）
 - ✅ ROADMAP Phase 1：对话轮次 / Token 估算 / 按模型·项目拆分 / 会话详情面板与日报章节
 - ✅ ROADMAP Phase 3：按模型费用估算 / 按项目成本分摊 / 成本面板与日报成本章节（+ 周/月汇总成本账本）
 - ✅ ROADMAP Phase 4：死循环检测 + 专注度评分 + Vibe 编程人格分析（洞察页面板与日报今日建议）
@@ -50,7 +50,7 @@
 - ✅ 每日目标 streak（`goals.py`：总活跃/编码时长目标 + 连续达成天数）
 - ✅ 个性化基线（`learn.py`：滑动窗口 + z-score 常态检测）
 - ✅ 性能指纹缓存（ai_sessions / browser_history / sqlite_store 提速）
-- ✅ 覆盖率门禁 70%（pytest 483 项，实测 79%）
+- ✅ 覆盖率门禁 70%（pytest ~499 项，实测 80%）
 - ✅ Git 侧采纳率代理指标（`adoption.py` + `/api/adoption`：retention/reworked_ratio 粗代理，免责+折叠展示，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍）
 - ✅ 受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势，双周期解析与周期别名）
 - ✅ dashboard 纯函数外置 `dashboard_util.py` + frontend smoke / e2e 冒烟测试上线
@@ -195,7 +195,7 @@ A：分阶段推进，每个 Phase 都可以独立交付，不必一次性完成
 | # | 优化项 | 改动 | 优先级 | 风险 | 状态 |
 |---|--------|------|--------|------|------|
 | 1 | **前端模板外抽** | `dashboard.py` 内约 2400 行内联 `PAGE_TEMPLATE`（HTML/JS）抽到 `assets/dashboard.html`，运行时加载（兼容 `sys._MEIPASS` 与 `paths.script_dir()`），`VibeTrace.spec` 的 `datas` 增加该文件；`dashboard.py` 由约 3850 行降至约 1450 行 | 中 | 低（沿用既有打包范式） | 已规划 |
-| 2 | **`_available_days` 加 mtime/TTL 缓存** | 仿 `_agg_cache` 范式，单次请求内多次调用（如 `/api/days`+`/api/dates`、`_collect_known_apps` 两次切片）与长历史安装（数百日期文件夹）省去重复 `os.listdir` | 高 | 极低 | 已规划 |
+| 2 | **`_available_days` 加 mtime/TTL 缓存** | 仿 `_agg_cache` 范式，单次请求内多次调用（如 `/api/days`+`/api/dates`、`_collect_known_apps` 两次切片）与长历史安装（数百日期文件夹）省去重复 `os.listdir` | 高 | 极低 | ✅ 已落地（days-cache，含 seed_day 播种失效约定） |
 | 3 | **`applog.read_recent` 流式读尾部** | `collections.deque(maxlen=n)` 逐行迭代替代 `readlines()` 全量读入内存，长日志下显著降低内存占用，行为等价 | 高 | 极低 | 已规划 |
 
 ### 9.3 暂不做（记录原因）
@@ -203,3 +203,52 @@ A：分阶段推进，每个 Phase 都可以独立交付，不必一次性完成
 - **命名统一 `usagemon`/`usagemonitor` → `vibetrace`**：代码里仍残留（`applog` logger 名、`USAGEMON_*` 环境变量、`usagemon_hist_*` / `usagemonitor-update` 临时目录、备份文件名）。但 `updater` 过渡期仍在用旧资产名 `UsageMonitor.exe`（git 已有"过渡期双名支持"），建议待过渡完成后单独 PR，避免打断更新链路。
 - ~~合并双测试体系~~ **已完成**（原判「暂缓」）：采用机械整移而非逐条改写，零断言丢失、可静态对账（check/ok 调用数守恒），成本远低于当初评估。
 - **`timeline.py`**：并非死代码，是生成 `assets/timeline_preview.html` 的独立预览工具，保留。
+
+
+## 十、质量与维护路线图（2026-08 起）
+
+> 项目进入**维护优先期**：不再堆叠新特性，以正确性、健壮性、可验证性为主线。节奏约定见 10.4。
+
+### 10.1 现状基线
+
+| 维度 | 状态 |
+|------|------|
+| 版本 | v2.8.2 已发布；批次二修复在 master `[未发布]`，随批次三一起发 |
+| 测试 | pytest ~499 用例 / 七层（unit/integration/api/security/performance/frontend/e2e），全链路 E2E 七阶段一条龙 |
+| 覆盖率 | 实测 **80%**（门禁 70%，红线 ≥78%） |
+| 静态检查 | ruff 零违规为合入前提 |
+| 缓存架构 | 五处模块级缓存全部有锁（collect/parse LRU、agg、aliases、days-cache）；枚举字节级确定是缓存正确性前提 |
+| 配置解析口径 | 全仓统一：**显式 config_path > `<root>/config.json` > 全局默认**（`report._config_for_root` 与 `dashboard._load_config_for_root` 同语义）；新代码禁止自造第二套解析 |
+
+### 10.2 已完成批次（修 BUG 路线第一、二批）
+
+| 批次 | 内容 | 关键教训 |
+|------|------|----------|
+| 批次一 → v2.8.2 | B1 五处模块级缓存补线程锁（dashboard 多线程下 LRU 竞态可抛异常/脏读）；B2 日报链透传 config_path（`--data-root` 下报表用错配置）；B6 暂停分支补退出检查（暂停后退出挂死） | docstring 契约与实现可能相反（budget 500→200）；目录 mtime 有时钟粒度，测试播种必须主动失效缓存 |
+| 批次二 → master 待发 | B3 `_walk_files` 每层排序+上限 500→4096+截断计数信号（修「随机子集+同指纹→结果缓存静默错数」）；F4 周/月报与成本账本接通 config_path，激活 CLI 从未生效的 `--config` 死参数（5 个消费点），dashboard 月报入口同步透传 | 截断发生在收集途中——只在最终 sort 救不了随机子集；死参数要 grep 消费点验证而非看定义 |
+
+### 10.3 待办批次（按优先级）
+
+| 批次 | 方向 | 内容与切入点 | 验收标准 | 预估 |
+|------|------|--------------|----------|------|
+| **B4** | 契约一致性审计 | dashboard.py 共 17 处 `, 500)` 异常出口，逐一对照其 docstring/注释承诺（「失败不拖垮仪表盘」「返回空态」「best-effort」）：该兑现的兑现、该改文档的改文档 | 每个端点的异常态行为与声明一致且有参数化测试钉住；对照清单归档进 docs | 1 天 |
+| **B5** | 日历边界矩阵 | growth 的 ISO 周桶 / trend 周均值 / retention 清理 / 月末算法统一为 `calendar.monthrange` 单一实现；边界矩阵：闰年、12 月、0000/9999 年、每月最后一天 | 边界矩阵参数化单测全绿；月末算法无第二份实现 | 半天 |
+| **收口** | CLI 单日报路径 | main() 中 `--day/--today` 的 `generate_day_report`(~1290)/`generate_consolidated_md`(~1304) 与 `verify_days`(~1152) 喂 `args.config`（F4 遗留：链内已支持仅入口缺接） | `--config` 对所有报表路径生效的反向钉扎测试 | 2 小时 |
+| **B7** | 真实规模数据回归 | make_demo_data 造重度用户画像（千会话/百天/多工具）跑全链路计时基线；>2MB 大文件旁路解析缓存、opencode.db 逐日重扫两处按需优化 | 计时基线文档入库；超阈值点已优化或有记录结论 | 1 天 |
+| **B8** | 安全面二次复查 | CSV 公式注入（`_sanitize_csv` 覆盖面）、日报/仪表盘把窗口标题等外部输入写入 HTML 的转义汇点、备份 zip 内符号链接；攻击者视角过一遍「外部输入→文件名/HTML/CSV」全部汇点 | 攻击面清单归档；新增安全层测试覆盖所列汇点 | 1 天 |
+
+> 执行方式沿用 agent-teams 协作范式：一批一个方向、工程师并行（文件所有权互斥）+ QA 独立验证（全量回归 + diff 评审 + stash 反证抽查），每个修复必须有「旧代码上必红」的回归钉扎。
+
+### 10.4 发布节奏与流程约定
+
+1. **一批一个方向**：做完即停，向用户汇报并确认后再开下一批。
+2. **发布纪律**：只有落地了用户可见修复的批次才打 patch 标签；纯测试/文档批次不发版。整体放缓节奏，避免功能堆叠。
+3. **CHANGELOG 双语随批更新** `[未发布]` 段，发布时原地转换版本号并同步 README/TODO/ROADMAP 五处版本引用。
+4. **每个修复四步**：定位实锤 → 最小修复 → 回归钉扎（反证可红）→ CHANGELOG。
+
+### 10.5 明确暂缓（记录理由，防止反复）
+
+- 自然语言查询（需本地嵌入模型，违背零依赖原则，待可行事件源）
+- 采纳率/留存率精确归因（需 IDE 插件事件源；Git 侧粗代理已上线并标注免责）
+- `usagemon*` 命名统一（updater 过渡期依赖旧资产名，待过渡完成单独 PR）
+- 前端模板外抽（9.2 #1，收益大但触碰打包链路，安排在功能冻结期单独做）
