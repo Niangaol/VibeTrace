@@ -219,7 +219,7 @@ Each phase can be delivered independently. Full plan: [docs/ROADMAP.md](docs/ROA
 ## Running tests
 
 ```powershell
-python -m pytest tests -q   # 483 test cases (unit / integration / API / security / performance / full-chain E2E)
+python -m pytest tests -q   # ~499 test cases (unit / integration / API / security / performance / full-chain E2E)
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 violations
