@@ -8,6 +8,13 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Fixed
+
+- **Non-deterministic directory-walk truncation**: `_walk_files` silently cut off at 500 files in os.walk order — machines with many session files got a random per-day subset, and worse, the fingerprint stayed identical so the result cache served subset A's results as valid for subset B (silently wrong numbers). Enumeration now sorts per level (byte-stable), cap raised to 4096 (aligned with parse cache), truncation leaves a module-level counter signal
+- **Weekly/monthly report config flow + dead CLI flag**: `_ai_cost_ledger_md` / `generate_month_report_md` and month/week budget blocks read global defaults on their own, and `--config` was defined in CLI main but never consumed by any report. All now thread `config_path` (priority matches the day-report chain); the dashboard month-report entry passes it through too. Single-day CLI path residue deferred to next batch
+
 ## [2.8.2] - 2026-08-23
 
 > Theme: patch fixes — cache concurrency safety, report-chain config flow, pause-state exit semantics. No new features.
