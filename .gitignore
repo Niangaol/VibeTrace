@@ -45,3 +45,4 @@ x/
 
 # AgentTeams 团队状态目录（本地工作产物，不提交）
 .agent-teams/
+logs/
