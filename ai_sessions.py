@@ -277,16 +277,45 @@ def _config_paths(config: dict) -> dict[str, list[str]]:
     return _default_tool_paths()
 
 
-def _walk_files(dirs: list[str], max_files: int = 500) -> list[str]:
-    """递归收集目录下 JSON/JSONL 文件（限制数量与单文件大小）。"""
+# 目录枚举截断上限（B3）：与解析记忆化上限 _PARSE_CACHE_MAX_ENTRIES 同值（4096）。
+# 旧值 500 是 v2.7 的保守估计：重度用户单日会话文件实测 900+，每天统计的都是随
+# os.walk 返回序漂移的「随机子集」；提到与解析缓存一致的容量后，「能枚举的」与
+# 「能缓存的」对齐，正常开发机不再触发截断。仍保留上限防失控目录拖垮热路径。
+_WALK_MAX_FILES = 4096
+# 截断信号（轻量方案）：发生截断时 +1 的模块级诊断计数器（观测/测试断言点，
+# 不抛异常、不 print；多线程下允许极小概率漏计——仅用于发现「统计为截断子集」，
+# 非精确审计）。
+_WALK_TRUNCATED_COUNT = 0
+
+
+def _walk_files(dirs: list[str], max_files: int | None = None) -> list[str]:
+    """递归收集目录下 JSON/JSONL 文件（限制数量与单文件大小）。
+
+    确定性（B3）：os.walk 返回序由文件系统决定且不保证有序，同一棵树两次枚举
+    可能得到不同序列；在数量截断下这会让统计口径变成逐日漂移的随机子集，也破坏
+    指纹缓存「同树同结果」的前提。因此每层先排序再遍历：顶层目录列表排序 +
+    sorted(dirs)/sorted(files)，同一棵树任意两次枚举结果字节级一致。
+
+    公平性：调用方按工具各传各的目录列表（_collect_local → _iter_tool_messages
+    每工具一次），单个巨目录只占本工具的配额，不会饿死其他工具。
+
+    截断可见性：达到 max_files 提前返回时结果为截断子集（统计数字偏小），通过
+    模块级计数器 _WALK_TRUNCATED_COUNT 记一次信号供观测，保持热路径零 I/O 开销。
+    """
+    global _WALK_TRUNCATED_COUNT
+    if max_files is None:
+        max_files = _WALK_MAX_FILES  # 调用时取值：改常量即全局生效（便于测试）
     out: list[str] = []
     seen: set[str] = set()
-    for base in dirs:
+    for base in sorted(dirs):
         if not os.path.isdir(base):
             continue
-        for root, _dirs, files in os.walk(base):
-            for name in files:
+        for root, sub_dirs, files in os.walk(base):
+            sub_dirs[:] = sorted(sub_dirs)  # 每层目录排序：固定递归顺序（topdown 原地生效）
+            for name in sorted(files):      # 每层文件排序：消除文件系统返回序差异
                 if len(out) >= max_files:
+                    # 截断信号：本次统计为截断子集（数字偏小），记一次供观测
+                    _WALK_TRUNCATED_COUNT += 1
                     return out
                 if not name.lower().endswith((".json", ".jsonl", ".ndjson")):
                     continue

@@ -554,7 +554,10 @@ class Handler(BaseHTTPRequestHandler):
         return report._report_from_agg(agg, "电脑使用情况周报（最近 7 个有数据日）")
 
     def _render_month_md(self, agg: dict) -> str:
-        return report.generate_month_report_md(agg.get("month", ""), self.server.data_root)
+        # 与日报链同源：仪表盘触发的月报也透传 --config（server.config_path），
+        # 链内解析优先级 config_path > <root>/config.json > 全局默认（见 report._config_for_root）
+        return report.generate_month_report_md(agg.get("month", ""), self.server.data_root,
+                                               config_path=self.server.config_path)
 
     def _handle_export(self, query: dict, root: str) -> None:
         """/api/export：CSV/JSON 一键下载（day/week/month）。"""

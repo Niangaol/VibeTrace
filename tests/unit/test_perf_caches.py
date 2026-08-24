@@ -182,3 +182,101 @@ def test_parse_cache_reuses_across_days_and_invalidates_on_change(tmp_path, monk
     r = ai_sessions.collect("2026-08-20", cfg)
     assert r["total"]["turns"] == 2, "变化后应看到新消息"
     assert calls["n"] == 2
+
+
+# ---------------------------------------------------------------------------
+# B3 回归：_walk_files 确定性枚举 + 截断上限/可见性
+# ---------------------------------------------------------------------------
+
+def test_walk_files_truncates_over_limit_and_signals(tmp_path):
+    """B3①：>4096 个会话文件的树 → 恰好返回 _WALK_MAX_FILES 个且截断计数器 +1。
+
+    背景：旧上限 500 对重度用户（实测 900+ 会话文件/日）静默截断且无任何信号，
+    统计数字悄悄不准；修复后上限与解析记忆化对齐（4096），发生截断时模块级
+    计数器 _WALK_TRUNCATED_COUNT 必须留下可见痕迹。
+    """
+    big = tmp_path / "big"
+    big.mkdir()
+    n_total = ai_sessions._WALK_MAX_FILES + 1  # 最小超限规模：4097 个
+    for i in range(n_total):
+        (big / f"s_{i:05d}.jsonl").write_text("", encoding="utf-8")
+
+    before = ai_sessions._WALK_TRUNCATED_COUNT
+    out = ai_sessions._walk_files([str(big)])
+    assert len(out) == ai_sessions._WALK_MAX_FILES, "应恰好截断到上限"
+    assert ai_sessions._WALK_TRUNCATED_COUNT == before + 1, "截断必须留下信号"
+
+    # 同一棵超限树再枚举：截断子集也必须确定（同树同截断面，缓存正确性前提）
+    out2 = ai_sessions._walk_files([str(big)])
+    assert out2 == out, "同一棵超限树两次枚举的截断子集应一致"
+    print("  [PASS] walk_files_truncates_over_limit_and_signals")
+
+
+def test_walk_files_deterministic_on_same_tree(tmp_path):
+    """B3②：乱序命名的同一棵树两次枚举结果相等；顶层 dirs 顺序不影响输出。
+
+    os.walk 返回序依赖文件系统，不排序则统计口径逐日漂移；修复后每层排序，
+    且函数入口对传入目录列表排序，配置字典顺序不再影响结果。
+    """
+    t1 = tmp_path / "tree"
+    (t1 / "sub_mid").mkdir(parents=True)
+    (t1 / "Sub_A").mkdir()
+    # 故意乱序命名 + 深浅交错
+    for rel in ("zeta.jsonl", "alpha.jsonl", "sub_mid/q.jsonl",
+                "sub_mid/b.jsonl", "Sub_A/n.jsonl"):
+        p = t1 / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("{}", encoding="utf-8")
+    t2 = tmp_path / "tree2"
+    t2.mkdir()
+    (t2 / "m.jsonl").write_text("{}", encoding="utf-8")
+
+    s1, s2 = str(t1), str(t2)
+    a = ai_sessions._walk_files([s1, s2])
+    b = ai_sessions._walk_files([s1, s2])
+    assert a == b and len(a) == 6, "同一棵树两次枚举应字节级一致"
+    assert a == ai_sessions._walk_files([s2, s1]), \
+        "传入目录顺序不同不应影响枚举结果（入口排序）"
+    print("  [PASS] walk_files_deterministic_on_same_tree")
+
+
+def test_walk_files_sorts_shuffled_os_walk(tmp_path, monkeypatch):
+    """B3③：monkeypatch os.walk 返回故意乱序列表 → 输出仍按层有序且可复现。"""
+    root = tmp_path / "shuffled"
+    (root / "a_dir").mkdir(parents=True)
+    (root / "m_dir").mkdir()
+    # 物理文件真实存在（getsize 过滤需要）；乱序只发生在 fake walk 的返回序里
+    for rel in ("a.jsonl", "b.jsonl", "z.jsonl", "a_dir/x.jsonl", "m_dir/y.jsonl"):
+        (root / rel).write_text("{}", encoding="utf-8")
+
+    # 内存树模拟目录结构；fake walk 返回故意乱序的列表（目录 m_dir 在前、
+    # 文件 z/b/a 乱序），并按「消费方排序后的子目录序」深入——与真实
+    # os.walk(topdown=True) 尊重原地排序的契约一致。
+    tree = {
+        ".": {"dirs": ["m_dir", "a_dir"], "files": ["z.jsonl", "b.jsonl", "a.jsonl"]},
+        "a_dir": {"files": ["x.jsonl"]},
+        "m_dir": {"files": ["y.jsonl"]},
+    }
+
+    def fake_walk(base, **_kw):
+        rel = os.path.relpath(base, str(root)).replace("\\", "/")
+        node = tree.get(rel)
+        if node is None:
+            return
+        dirs = list(node.get("dirs", []))
+        yield (base, dirs, list(node.get("files", [])))
+        for d in dirs:  # 注意：此处读的是消费方可能原地排序后的列表
+            child_rel = ("" if rel == "." else rel + "/") + d
+            child = os.path.join(base, d)
+            cnode = tree.get(child_rel, {})
+            yield (child, [], list(cnode.get("files", [])))
+
+    monkeypatch.setattr(ai_sessions.os, "walk", fake_walk)
+    out = ai_sessions._walk_files([str(root)])
+    # 乱序输入被规整：本层文件先出（已排序），再按排序后的目录逐层深入
+    expected = [os.path.join(str(root), n) for n in ("a.jsonl", "b.jsonl", "z.jsonl")]
+    expected += [os.path.join(str(root), "a_dir", "x.jsonl"),
+                 os.path.join(str(root), "m_dir", "y.jsonl")]
+    assert out == expected, f"乱序输入下输出应已排序且顺序固定，实际 {out}"
+    assert out == ai_sessions._walk_files([str(root)]), "重复枚举应可复现"
+    print("  [PASS] walk_files_sorts_shuffled_os_walk")

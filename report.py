@@ -492,19 +492,22 @@ def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = Non
         return None
 
 
-def _ai_cost_ledger_md(days: list[str], data_root: str, label: str = "周度") -> str | None:
+def _ai_cost_ledger_md(days: list[str], data_root: str, label: str = "周度",
+                       config_path: str | None = None) -> str | None:
     """AI 成本与投入账本（ROADMAP Phase 3 · 周/月汇总支出报表）。
 
     遍历 days，逐日 collect AI 会话深度（本地+可选 Web），聚合出
     消息/轮次/Token/成本，并按 模型 / 项目 / 工具 汇总成本与轮次，
     生成一段 Markdown「AI 成本账本」。仅当 ai_sessions.enabled 且至少
     一天有数据时返回；只读本地、绝不联网。任何异常返回 None。
+    config_path 可选：显式配置路径（generate_month_report_md / CLI --week
+    透传 --config）；与日报链同源，统一走 _config_for_root 解析，优先级
+    config_path > <root>/config.json > 全局默认（缺省 None 保持旧行为）。
     """
     try:
-        import classifier  # noqa: PLC0415
-        import ai_sessions  # noqa: PLC0415
-        config_path = os.path.join(data_root, "config.json")
-        config = classifier.load_config(config_path) if os.path.isfile(config_path) else classifier.load_config()
+        import ai_sessions  # noqa: PLC0415 —— 配置解析统一走日报链同款助手
+        # 与日报链同源：不再自取全局默认配置，按 _config_for_root 统一优先级解析
+        config = _config_for_root(data_root, config_path)
         ai_cfg = config.get("ai_sessions") or {}
         if not isinstance(ai_cfg, dict) or not ai_cfg.get("enabled"):
             return None
@@ -943,8 +946,14 @@ def aggregate_month(month_str: str, data_root: str) -> dict:
     return agg
 
 
-def generate_month_report_md(month_str: str, data_root: str) -> str:
-    """生成中文 Markdown 月报文本。"""
+def generate_month_report_md(month_str: str, data_root: str,
+                             config_path: str | None = None) -> str:
+    """生成中文 Markdown 月报文本。
+
+    config_path 可选：显式配置路径（CLI --config / 调用方透传）；与日报链同源，
+    链内配置（月度 AI 成本账本等）统一按 _config_for_root 的优先级解析：
+    config_path > <root>/config.json > 全局默认（缺省 None 保持旧行为）。
+    """
     agg = aggregate_month(month_str, data_root)
     out = [
         f"# 电脑使用情况月报 {month_str}", "",
@@ -982,17 +991,17 @@ def generate_month_report_md(month_str: str, data_root: str) -> str:
         out.append("")
         out.append(_md_table(["应用", "联系人", "时长"], rows))
     # ROADMAP Phase 3：月度 AI 成本账本（周/月汇总支出报表）
-    ledger = _ai_cost_ledger_md(_month_days(month_str), data_root, f"月度 · {month_str}")
+    # 与日报链同源：config_path 一路透传给成本账本（解析优先级见 _config_for_root）
+    ledger = _ai_cost_ledger_md(_month_days(month_str), data_root,
+                                f"月度 · {month_str}", config_path=config_path)
     if ledger:
         out.append("")
         out.append(ledger)
     # v2.6 P3：月度成本预算小结（默认关闭；超支/接近才提示，失败静默降级）
     try:
-        import budget  # noqa: PLC0415
-        import classifier  # noqa: PLC0415
-        config_path = os.path.join(data_root, "config.json")
-        config = (classifier.load_config(config_path)
-                  if os.path.isfile(config_path) else classifier.load_config())
+        import budget  # noqa: PLC0415 —— 预算块与日报链同源：统一走 _config_for_root，
+        # 不再自解析（原写法会遮蔽同名参数、且吃不到显式 config_path）
+        config = _config_for_root(data_root, config_path)
         bmd = budget.budget_summary_md(
             budget.budget_status(month_str, data_root, config, period="monthly"))
         if bmd:
@@ -1194,12 +1203,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.json:
             print(json.dumps(agg, ensure_ascii=False, indent=2, default=str))
         else:
-            print(generate_month_report_md(month_str, data_root))
+            # 与日报链同源：CLI 手上有 --config 就显式透传（解析优先级见 _config_for_root）
+            print(generate_month_report_md(month_str, data_root, config_path=args.config))
         if args.write:
             day_dir = os.path.join(data_root, month_str)
             os.makedirs(day_dir, exist_ok=True)
             with open(os.path.join(day_dir, "report_month.md"), "w", encoding="utf-8") as fh:
-                fh.write(generate_month_report_md(month_str, data_root))
+                fh.write(generate_month_report_md(month_str, data_root, config_path=args.config))
             with open(os.path.join(day_dir, "report_month.json"), "w", encoding="utf-8") as fh:
                 json.dump(agg, fh, ensure_ascii=False, indent=2, default=str)
         return 0
@@ -1211,22 +1221,23 @@ def main(argv: list[str] | None = None) -> int:
             _log_info(f"生成周报 {days[0]}~{days[-1]}")
             for ds in days:
                 try:
-                    generate_day_report(ds, data_root)
+                    # 周报链上的逐日日报生成：同样把 --config 显式透传（与日报链同源）
+                    generate_day_report(ds, data_root, config_path=args.config)
                 except Exception as exc:  # noqa: BLE001
                     print(f"[report] 生成 {ds} 失败: {exc}", file=sys.stderr)
         agg = aggregate_days(days, data_root)
         # ROADMAP Phase 3：周度 AI 成本账本
-        week_ledger = _ai_cost_ledger_md(days, data_root, "周度 · 最近7天")
+        # 与日报链同源：CLI 手上有 --config 就显式透传（解析优先级见 _config_for_root）
+        week_ledger = _ai_cost_ledger_md(days, data_root, "周度 · 最近7天",
+                                         config_path=args.config)
         week_md = _report_from_agg(agg, "电脑使用情况周报（最近 7 天）")
         if week_ledger:
             week_md = week_md + chr(10) + chr(10) + week_ledger
         # v2.6 P3：逐日预算小结（默认关闭；失败静默降级）
         try:
+            # 预算块与日报链同源：--config 显式透传（统一走 _config_for_root，不再自解析）
             import budget  # noqa: PLC0415
-            import classifier  # noqa: PLC0415
-            config_path = os.path.join(data_root, "config.json")
-            config = (classifier.load_config(config_path)
-                      if os.path.isfile(config_path) else classifier.load_config())
+            config = _config_for_root(data_root, args.config)
             bmd = budget.budget_week_summary(days, data_root, config)
             if bmd:
                 week_md = week_md + chr(10) + chr(10) + bmd
