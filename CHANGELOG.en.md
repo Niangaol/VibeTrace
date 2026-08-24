@@ -8,7 +8,9 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [2.8.2] - 2026-08-23
+
+> Theme: patch fixes — cache concurrency safety, report-chain config flow, pause-state exit semantics. No new features.
 
 ### Fixed
 
@@ -16,7 +18,7 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 - **Report chain config flow break**: the `finalize_day → generate_day_report → generate_consolidated_md` chain never received configuration — report generation silently used global defaults, so settings written under `--data-root`'s config.json or an explicit `--config` did not apply to daily reports (inconsistent with the dashboard). The chain now threads `config_path` end-to-end with unified resolution priority **explicit config_path > `<root>/config.json` > global default** (same semantics as dashboard `_load_config_for_root`; existing callers unchanged). Weekly/monthly reports share the flaw — located, deferred to next batch
 - **Pause-state exit semantics**: the daemon loop's pause branch `continue` skipped every exit check at the loop tail, so "pause then quit" left the thread waiting forever. Pause waits now honor stop_event and test_seconds expiry
 
-### Tests
+### Tests (2.8.2)
 
 - New `tests/integration/test_report_config_flow.py` (reversed-priority tripwire), `tests/unit/test_cache_concurrency.py`, `test_stop_while_paused` (negative-proofed: hangs under old code until timeout); conftest dead-code cleanup
 
@@ -485,6 +487,7 @@ Pure standard library with zero third-party dependencies; static CPU < 0.1%, mem
 - Tests: test_all adds 11 dashboard API tests (endpoints / 403 / security headers / error codes / path traversal);
   post-build `UsageMonitor.exe --version` smoke test; all 125 assertions pass the gate.
 
+[2.8.2]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.2
 [2.8.1]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.0
 [2.7.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.7.0

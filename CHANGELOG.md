@@ -8,7 +8,9 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
-## [未发布]
+## [2.8.2] - 2026-08-23
+
+> 主题：小版本修复——缓存并发安全、报表链配置流、暂停态退出语义。无新特性。
 
 ### 修复
 
@@ -16,7 +18,7 @@
 - **报表链配置流断裂**：`finalize_day → generate_day_report → generate_consolidated_md` 链路此前不透传配置，report 自行取全局默认——`--data-root`/`--config` 用户写在数据根或显式文件里的 ai_sessions/browser 等设置对每日报表不生效，且与仪表盘口径不一致。现全链路接通 `config_path`，解析优先级统一为 **显式 config_path > `<root>/config.json` > 全局默认**（与 dashboard `_load_config_for_root` 同语义；既有调用方零改动）。周/月报同病已定位、留待下批
 - **暂停态退出语义**：守护循环暂停分支的 `continue` 会跳过循环尾部全部退出检查，「先暂停再退出」时线程永远等不到停止信号。现暂停等待前即响应 stop_event 与 test_seconds 到时
 
-### 测试
+### 测试（2.8.2）
 
 - 新增 `tests/integration/test_report_config_flow.py`（双配置反向钉扎：谁把显式优先级改回去谁就红）、`tests/unit/test_cache_concurrency.py`、`test_stop_while_paused`（旧代码上挂死被 timeout 击杀的反证钉扎）；conftest 清理一处历史死代码
 
@@ -503,6 +505,7 @@
 - 测试：test_all 新增 11 项 dashboard API 测试（端点 / 403 / 安全头 / 错误码 / 路径穿越），
   构建后 `UsageMonitor.exe --version` 冒烟，全量 125 项门禁通过。
 
+[2.8.2]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.2
 [2.8.1]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.1
 [2.8.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.8.0
 [2.7.0]: https://github.com/Niangaol/VibeTrace/releases/tag/v2.7.0
