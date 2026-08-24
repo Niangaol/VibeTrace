@@ -278,6 +278,109 @@ def test_pause_resume():
     shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_stop_while_paused():
+    """先暂停再退出（B6 回归钉扎）：暂停分支不得吞掉停止信号。
+
+    修复前：暂停分支 `_pause.wait(poll_interval); continue` 会跳过循环尾部全部
+    退出检查，stop_event 置位也无人理会——伪钟下空转到 test_seconds 打满，真实
+    场景则是永久挂起。修复后：暂停分支在 wait 前补齐 stop_event / test_seconds
+    检查，置位即当轮 break。全程伪时钟（FakeClock + FakePauseEvent + _fake_sleep），
+    不真睡。
+    """
+    print("[test] 先暂停再退出（暂停中置位 stop_event -> run_daemon 及时返回）")
+    tmp = fresh_tmp("stop_paused")
+    cfg = classifier.load_config()
+    cfg["data_root"] = tmp
+    cfg["poll_interval_s"] = 1
+    cfg["idle_threshold_s"] = 180
+    # 隔离：同 test_pause_resume，禁止 finalize_day 触碰真实会话目录
+    cfg["ai_sessions"] = {"enabled": False}
+    cfg["browser_history_enabled"] = False
+
+    import datetime as _dtmod
+
+    real_fg = win32core.get_foreground_info
+    real_idle = win32core.idle_seconds
+    real_dt_class = monitor.datetime.datetime
+    real_mono = monitor.time.monotonic
+    real_sleep = monitor.time.sleep
+    real_pause_event = monitor._pause
+
+    clock = FakeClock([FG("code.exe", "main.py")] * 40)
+    fake_mono = [0.0]
+    fake_dt = [_dtmod.datetime.now().replace(microsecond=0)]
+
+    class _FakePauseEvent:
+        """is_set 语义同 Event；wait(timeout) 推进伪时钟，并在第 2 次 wait 后
+        模拟「托盘退出」置位 stop_event（此时守护线程正处于暂停态）。"""
+
+        def __init__(self):
+            self._flag = False
+
+        def set(self):
+            self._flag = True
+
+        def clear(self):
+            self._flag = False
+
+        def is_set(self):
+            return self._flag
+
+        def wait(self, timeout=None):
+            if timeout:
+                fake_mono[0] += float(timeout)
+                fake_dt[0] += _dtmod.timedelta(seconds=float(timeout))
+            waits["n"] += 1
+            if waits["n"] == 2:
+                monitor.stop_event.set()
+            return True
+
+    class _FakeDT(real_dt_class):  # type: ignore[valid-type]
+        @classmethod
+        def now(cls, tz=None):
+            return fake_dt[0]
+
+    # 轮次编排：第 2 个活动轮后进入暂停态（此后走暂停分支，不再经 _fake_sleep）；
+    # 暂停期第 2 次 wait 时置位 stop_event，模拟「托盘退出」
+    sleeps = {"n": 0}
+    waits = {"n": 0}
+
+    def _fake_sleep(secs):
+        fake_mono[0] += float(secs)
+        fake_dt[0] += _dtmod.timedelta(seconds=float(secs))
+        sleeps["n"] += 1
+        if sleeps["n"] == 2:
+            monitor.set_paused(True)
+
+    win32core.get_foreground_info = clock.fg_now
+    win32core.idle_seconds = clock.idle_now
+    monitor.datetime.datetime = _FakeDT  # type: ignore[attr-defined]
+    monitor.time.monotonic = lambda: fake_mono[0]  # type: ignore[attr-defined]
+    monitor.time.sleep = _fake_sleep  # type: ignore[attr-defined]
+    monitor._pause = _FakePauseEvent()
+    monitor.stop_event.clear()
+    monitor.set_paused(False)
+
+    try:
+        recs = monitor.run_daemon(cfg, test_seconds=60)
+    finally:
+        win32core.get_foreground_info = real_fg
+        win32core.idle_seconds = real_idle
+        monitor.datetime.datetime = real_dt_class  # type: ignore[attr-defined]
+        monitor.time.monotonic = real_mono  # type: ignore[attr-defined]
+        monitor.time.sleep = real_sleep  # type: ignore[attr-defined]
+        monitor._pause = real_pause_event
+        monitor.stop_event.clear()
+        monitor.set_paused(False)
+
+    check(len(recs) == 1, "仅进入暂停时截断会话写 1 条", f"实际 {len(recs)}")
+    # 及时返回：伪钟只走了个位数轮次即 break，远小于 test_seconds=60
+    # （修复前该断言永不满足——线程会在暂停分支里无限 continue）
+    check(fake_mono[0] < 20, f"及时退出（伪钟 {fake_mono[0]:.0f}s << test_seconds=60）")
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+
 def test_retention():
     print("[test] 保留清理（超过保留期删除，只删 YYYY-MM-DD 目录）")
     tmp = fresh_tmp("retention")

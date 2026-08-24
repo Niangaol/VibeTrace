@@ -324,10 +324,15 @@ def _refresh_inventory(data_root: str, config: dict) -> None:
         _log_error(data_root, datetime.date.today().isoformat(), exc, "inventory refresh")
 
 
-def finalize_day(day_str: str, data_root: str, retention_days: int) -> None:
-    """生成某天 report.md/report.csv；顺带做一次保留期清理。"""
+def finalize_day(day_str: str, data_root: str, retention_days: int,
+                 config_path: str | None = None) -> None:
+    """生成某天 report.md/report.csv；顺带做一次保留期清理。
+
+    config_path 可选：守护进程以 --config 启动时透传给日报链；链内解析优先级为
+    config_path > <root>/config.json > 全局默认（见 report._config_for_root）。
+    """
     try:
-        report.generate_day_report(day_str, data_root)
+        report.generate_day_report(day_str, data_root, config_path=config_path)
     except Exception as exc:  # noqa: BLE001
         _log_error(data_root, day_str, exc, f"finalize report {day_str}")
     try:
@@ -446,7 +451,7 @@ def run_daemon(config: dict, test_seconds: int | None = None, verbose: bool = Fa
                 current_day = day_str
                 yesterday = (now.date() - datetime.timedelta(days=1)).isoformat()
                 if not os.path.isfile(os.path.join(data_root, yesterday, "report.md")):
-                    finalize_day(yesterday, data_root, retention)
+                    finalize_day(yesterday, data_root, retention, config_path)
                 _refresh_inventory(data_root, config)  # 启动时刷新今日软件清单
                 try:
                     import applog  # noqa: PLC0415
@@ -461,7 +466,7 @@ def run_daemon(config: dict, test_seconds: int | None = None, verbose: bool = Fa
                     if rec and test_seconds:
                         test_records.append(rec)
                     session = None
-                finalize_day(current_day, data_root, retention)
+                finalize_day(current_day, data_root, retention, config_path)
                 _refresh_inventory(data_root, config)  # 跨天：新一天清单
                 current_day = day_str
                 try:
@@ -477,6 +482,13 @@ def run_daemon(config: dict, test_seconds: int | None = None, verbose: bool = Fa
                     if rec and test_seconds:
                         test_records.append(rec)
                     session = None
+                # 暂停分支的 continue 会跳过循环尾部的退出检查，须在此先行补查，
+                # 否则「先暂停再退出」时线程永远等不到停止信号（挂起）。
+                # 此处 session 已关闭置 None，直接 break 安全。
+                if test_seconds is not None and (time.monotonic() - start_mono) >= test_seconds:
+                    break
+                if stop_event.is_set():
+                    break
                 _pause.wait(poll_interval)
                 continue
 
@@ -525,6 +537,7 @@ def run_daemon(config: dict, test_seconds: int | None = None, verbose: bool = Fa
             if stop_event.is_set():
                 break
             # 应用内更新信号：dashboard「应用更新」时写入，优雅退出供更新脚本替换 exe
+            # （该检查不搬入暂停分支：罕见路径，恢复后的下一轮自然处理，避免重复检查）
             if os.path.isfile(os.path.join(data_root, ".update-requested")):
                 try:
                     import applog  # noqa: PLC0415

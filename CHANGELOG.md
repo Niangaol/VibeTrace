@@ -8,6 +8,18 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [未发布]
+
+### 修复
+
+- **模块级缓存线程安全**：dashboard 为多线程 HTTP 服务，但 `ai_sessions` 的 `_COLLECT_CACHE`/`_PARSE_CACHE`、`report` 的 `_agg_cache` 与 `_aliases_cache`、`dashboard_util` 的 days-cache 此前全部无锁——并发请求下 LRU 的 `move_to_end`/驱逐可抛「OrderedDict mutated during iteration」或脏读。五处统一补 `threading.Lock`（锁内只动表、解析与聚合计算留在锁外；days-cache 重扫留锁内防惊群）；新增 8 线程并发锤回归测试（含正面锤驱逐循环）
+- **报表链配置流断裂**：`finalize_day → generate_day_report → generate_consolidated_md` 链路此前不透传配置，report 自行取全局默认——`--data-root`/`--config` 用户写在数据根或显式文件里的 ai_sessions/browser 等设置对每日报表不生效，且与仪表盘口径不一致。现全链路接通 `config_path`，解析优先级统一为 **显式 config_path > `<root>/config.json` > 全局默认**（与 dashboard `_load_config_for_root` 同语义；既有调用方零改动）。周/月报同病已定位、留待下批
+- **暂停态退出语义**：守护循环暂停分支的 `continue` 会跳过循环尾部全部退出检查，「先暂停再退出」时线程永远等不到停止信号。现暂停等待前即响应 stop_event 与 test_seconds 到时
+
+### 测试
+
+- 新增 `tests/integration/test_report_config_flow.py`（双配置反向钉扎：谁把显式优先级改回去谁就红）、`tests/unit/test_cache_concurrency.py`、`test_stop_while_paused`（旧代码上挂死被 timeout 击杀的反证钉扎）；conftest 清理一处历史死代码
+
 ## [2.8.1] - 2026-08-23
 
 > 主题：小版本收口——多日 AI 成本查询性能修复（121s→0.95s）+ 预算端点边界修复 + 测试体系合二为一（`test_all.py` 退役、全链路 E2E）。无新特性。

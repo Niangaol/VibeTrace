@@ -1111,6 +1111,10 @@ def _generated_lines(text: str) -> int:
 # ---------------------------------------------------------------------------
 _COLLECT_CACHE: "OrderedDict[tuple, tuple[str, dict]]" = OrderedDict()
 _COLLECT_CACHE_MAX = 160  # ≥ 查询模板 max_days(92)：区间查询的逐日结果不再互挤（曾致缓存形同虚设）
+# 并发安全（dashboard 为 ThreadingHTTPServer）：LRU 的 move_to_end / popitem 驱逐
+# 在多线程并发下会互相踩踏（OrderedDict mutated during iteration / 脏读）。
+# 锁内只做查表/改表；指纹计算、解析与收集等重活一律在锁外，不放大持锁时间。
+_COLLECT_LOCK = threading.Lock()
 
 # 批内指纹复用（v2.9 性能修复）：_paths_fingerprint 本身要 os.walk 整棵会话目录
 # 树并 stat 全部文件——多日查询逐日调用 collect 时同一棵树被重复遍历 N 次
@@ -1168,8 +1172,10 @@ def _fingerprint_for_batch(tool_paths: dict[str, list[str]]) -> str:
 
 def invalidate_collect_cache() -> None:
     """清空 collect 结果缓存与解析缓存（测试用；正常运行靠指纹/TTL 自动失效）。"""
-    _COLLECT_CACHE.clear()
-    _PARSE_CACHE.clear()
+    with _COLLECT_LOCK:
+        _COLLECT_CACHE.clear()
+    with _PARSE_LOCK:
+        _PARSE_CACHE.clear()
 
 
 # 文件解析记忆化（v2.9 性能修复）：多日查询逐日调用 collect 时，同一份会话文件
@@ -1183,6 +1189,7 @@ _PARSE_CACHE: "OrderedDict[tuple, tuple[int, list[dict]]]" = OrderedDict()
 _PARSE_CACHE_MAX_ENTRIES = 4096
 _PARSE_CACHE_MAX_FILE_BYTES = 2 * 1024 * 1024
 _PARSE_CACHE_BUDGET_BYTES = 256 * 1024 * 1024
+_PARSE_LOCK = threading.Lock()  # 同 _COLLECT_LOCK：保护解析表的查/改与驱逐循环（含 sum 遍历）
 
 
 def _parse_file_cached(path: str, *, tag: str = "gen") -> list[dict]:
@@ -1193,18 +1200,20 @@ def _parse_file_cached(path: str, *, tag: str = "gen") -> list[dict]:
     if st.st_size > _PARSE_CACHE_MAX_FILE_BYTES:
         return _parse_pi_file(path) if tag == "pi" else parse_file(path)
     key = (tag, os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
-    hit = _PARSE_CACHE.get(key)
-    if hit is not None:
-        _PARSE_CACHE.move_to_end(key)
-        return hit[1]
-    msgs = _parse_pi_file(path) if tag == "pi" else parse_file(path)
-    _PARSE_CACHE[key] = (st.st_size, msgs)
-    # 驱逐：任一上限越界即从最旧端淘汰（同键新 mtime 视为新条目，自然置顶）
-    while (len(_PARSE_CACHE) > _PARSE_CACHE_MAX_ENTRIES
-           or sum(v[0] for v in _PARSE_CACHE.values()) > _PARSE_CACHE_BUDGET_BYTES):
-        if not _PARSE_CACHE:
-            break
-        _PARSE_CACHE.popitem(last=False)
+    with _PARSE_LOCK:
+        hit = _PARSE_CACHE.get(key)
+        if hit is not None:
+            _PARSE_CACHE.move_to_end(key)
+            return hit[1]
+    msgs = _parse_pi_file(path) if tag == "pi" else parse_file(path)  # 解析在锁外
+    with _PARSE_LOCK:
+        _PARSE_CACHE[key] = (st.st_size, msgs)
+        # 驱逐：任一上限越界即从最旧端淘汰（同键新 mtime 视为新条目，自然置顶）
+        while (len(_PARSE_CACHE) > _PARSE_CACHE_MAX_ENTRIES
+               or sum(v[0] for v in _PARSE_CACHE.values()) > _PARSE_CACHE_BUDGET_BYTES):
+            if not _PARSE_CACHE:
+                break
+            _PARSE_CACHE.popitem(last=False)
     return msgs
 
 
@@ -1248,15 +1257,17 @@ def _collect_cached(date_str: str, config: dict, section: dict,
         sort_keys=True, ensure_ascii=False)
     key = (date_str, cfg_sig)
     fp = _fingerprint_for_batch(tool_paths)
-    hit = _COLLECT_CACHE.get(key)
-    if hit is not None and hit[0] == fp:
-        _COLLECT_CACHE.move_to_end(key)
-        return hit[1]
+    with _COLLECT_LOCK:
+        hit = _COLLECT_CACHE.get(key)
+        if hit is not None and hit[0] == fp:
+            _COLLECT_CACHE.move_to_end(key)
+            return hit[1]
     result = _collect_local(date_str, config, section, token_est, mode,
-                            costs_enabled, pricing, tool_paths)
-    _COLLECT_CACHE[key] = (fp, result)
-    while len(_COLLECT_CACHE) > _COLLECT_CACHE_MAX:
-        _COLLECT_CACHE.popitem(last=False)
+                            costs_enabled, pricing, tool_paths)  # 收集计算在锁外
+    with _COLLECT_LOCK:
+        _COLLECT_CACHE[key] = (fp, result)
+        while len(_COLLECT_CACHE) > _COLLECT_CACHE_MAX:
+            _COLLECT_CACHE.popitem(last=False)
     return result
 
 

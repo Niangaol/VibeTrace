@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sys
+import threading
 import time
 import types
 import datetime
@@ -32,29 +33,40 @@ CATEGORY_ORDER = [
 DEFAULT_DATA_ROOT = paths.default_data_root()
 
 _aliases_cache: dict = {"ts": 0.0, "roots": {}}
+# 并发安全（同本文件 _AGG_LOCK / ai_sessions 缓存范式）：TTL 判断、过期清空、
+# roots 表查/写都在锁内；load_aliases 读盘在锁外。aggregate() 对本函数的调用点
+# 在 _AGG_LOCK 临界区之外，两把锁不嵌套，无死锁面。
+_ALIASES_LOCK = threading.Lock()
 
 # aggregate() 结果 LRU 缓存：dashboard 14 天趋势 / 月报 31 天 / 周报都会重复全量
 # 解析 usage.jsonl，缓存后同一天只解析一次。
 # value = (mtime, size, data)；文件 mtime/size 变化即失效（append 写会更新 mtime）。
 _AGG_CACHE_MAX = 16
 _agg_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
+# 并发安全（dashboard 为 ThreadingHTTPServer）：LRU 命中 move_to_end 与插入端
+# popitem 驱逐在多线程下会互相踩踏（脏读 / OrderedDict mutated during iteration）。
+# 锁内只做查表/改表；read_sessions + 聚合计算在锁外（同 ai_sessions 缓存范式）。
+_AGG_LOCK = threading.Lock()
 
 
 def _get_aliases(data_root: str) -> dict:
     """读取联系人别名表（按数据根目录缓存，5 秒 TTL 后刷新）。"""
-    now = time.monotonic()
-    if now - _aliases_cache["ts"] > 5.0:
-        _aliases_cache["roots"].clear()
-        _aliases_cache["ts"] = now
-    if data_root in _aliases_cache["roots"]:
-        return _aliases_cache["roots"][data_root]
+    with _ALIASES_LOCK:
+        now = time.monotonic()
+        if now - _aliases_cache["ts"] > 5.0:
+            _aliases_cache["roots"].clear()
+            _aliases_cache["ts"] = now
+        cached = _aliases_cache["roots"].get(data_root)
+        if cached is not None:
+            return cached
     aliases: dict = {}
     try:
         import classifier  # noqa: PLC0415
-        aliases = classifier.load_aliases(os.path.join(data_root, "aliases.json"))
+        aliases = classifier.load_aliases(os.path.join(data_root, "aliases.json"))  # 读盘在锁外
     except Exception:  # noqa: BLE001
         aliases = {}
-    _aliases_cache["roots"][data_root] = aliases
+    with _ALIASES_LOCK:
+        _aliases_cache["roots"][data_root] = aliases
     return aliases
 
 
@@ -65,6 +77,24 @@ def _default_data_root() -> str:
         return classifier.load_config().get("data_root") or DEFAULT_DATA_ROOT
     except Exception:  # noqa: BLE001
         return DEFAULT_DATA_ROOT
+
+
+def _config_for_root(data_root: str, config_path: str | None = None) -> dict:
+    """日报链统一配置解析：显式 config_path > <data_root>/config.json > 全局默认。
+
+    与 dashboard._load_config_for_root 语义一致：显式传入的 config_path（monitor
+    --config / dashboard server.config_path）是用户最强意图，排最前；其次随数据根
+    走的 <root>/config.json（设置页保存目标）；都没有才回退全局默认 config.json。
+    注意：dashboard 已单向 import report，report 这里不能反向 import dashboard
+    复用 _load_config_for_root（会循环导入），故按同一语义自实现。
+    """
+    import classifier  # noqa: PLC0415 —— 惰性导入避免循环依赖
+    if config_path and os.path.isfile(config_path):
+        return classifier.load_config(config_path)
+    local = os.path.join(data_root, "config.json")
+    if os.path.isfile(local):
+        return classifier.load_config(local)
+    return classifier.load_config()
 
 
 def read_sessions(date_str: str, data_root: str) -> list[dict]:
@@ -181,18 +211,20 @@ def aggregate(date_str: str, data_root: str) -> dict:
         st = None
     key = (date_str, data_root)
     if st is not None:
-        hit = _agg_cache.get(key)
-        if hit is not None and hit[0] == st.st_mtime and hit[1] == st.st_size:
-            _agg_cache.move_to_end(key)
-            return hit[2]
-    sessions = read_sessions(date_str, data_root)
+        with _AGG_LOCK:
+            hit = _agg_cache.get(key)
+            if hit is not None and hit[0] == st.st_mtime and hit[1] == st.st_size:
+                _agg_cache.move_to_end(key)
+                return hit[2]
+    sessions = read_sessions(date_str, data_root)  # 读盘与聚合在锁外
     aliases = _get_aliases(data_root)
     agg = _aggregate_records(sessions, date_str, data_root, aliases)
     if st is not None:
-        _agg_cache[key] = (st.st_mtime, st.st_size, agg)
-        _agg_cache.move_to_end(key)
-        while len(_agg_cache) > _AGG_CACHE_MAX:
-            _agg_cache.popitem(last=False)
+        with _AGG_LOCK:
+            _agg_cache[key] = (st.st_mtime, st.st_size, agg)
+            _agg_cache.move_to_end(key)
+            while len(_agg_cache) > _AGG_CACHE_MAX:
+                _agg_cache.popitem(last=False)
     return agg
 
 
@@ -360,11 +392,12 @@ def generate_report_md(date_str: str, data_root: str) -> str:
     return "\n".join(out)
 
 
-def _browser_daily(date_str: str, data_root: str, max_rows: int | None = None) -> tuple[dict | None, str | None]:
+def _browser_daily(date_str: str, data_root: str, max_rows: int | None = None,
+                   config_path: str | None = None) -> tuple[dict | None, str | None]:
     """收集某天浏览器数据 + 生成明细章节；不可用返回 (None, None)。"""
     try:
-        import browser_history  # noqa: PLC0415
-        config = browser_history.classifier.load_config()
+        import browser_history  # noqa: PLC0415 —— browser_history.classifier 与顶层 classifier 同模块
+        config = _config_for_root(data_root, config_path)
         data = browser_history.collect(date_str, data_root, config)
         if not data.get("enabled") or not data["visits"]:
             return None, None
@@ -374,17 +407,16 @@ def _browser_daily(date_str: str, data_root: str, max_rows: int | None = None) -
         return None, None
 
 
-def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = None) -> str | None:
+def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = None,
+                       config_path: str | None = None) -> str | None:
     """生成日报「AI 会话深度」章节（ROADMAP Phase 1 的可选展示）。
 
     需 config.json 里 ai_sessions.enabled=true；只读本地会话文件与浏览器访问
     明细，绝不联网。无任何数据时返回 None（日报主体不受影响）。
     """
     try:
-        import classifier  # noqa: PLC0415 —— 惰性导入避免循环依赖
         import ai_sessions  # noqa: PLC0415
-        config_path = os.path.join(data_root, "config.json")
-        config = classifier.load_config(config_path) if os.path.isfile(config_path) else classifier.load_config()
+        config = _config_for_root(data_root, config_path)
         ai_cfg = config.get("ai_sessions") or {}
         if not isinstance(ai_cfg, dict) or not ai_cfg.get("enabled"):
             return None
@@ -570,20 +602,16 @@ def _inventory_summary(date_str: str, data_root: str) -> dict | None:
         return None
 
 
-def _insights_section(agg: dict, date_str: str, data_root: str) -> str | None:
+def _insights_section(agg: dict, date_str: str, data_root: str,
+                      config_path: str | None = None) -> str | None:
     """生成日报「今日建议」段（仅离线规则洞察，绝不发起网络请求）。
 
     insights.enabled && insights.in_report 且规则非空时返回 Markdown 列表，
     否则返回 None。任何异常都静默降级为无建议（日报主体不受影响）。
     """
     try:
-        import classifier  # noqa: PLC0415 —— 惰性导入避免循环依赖
         import insights  # noqa: PLC0415
-        config_path = os.path.join(data_root, "config.json")
-        if os.path.isfile(config_path):
-            config = classifier.load_config(config_path)
-        else:
-            config = classifier.load_config()
+        config = _config_for_root(data_root, config_path)
         ins = config.get("insights")
         if not (isinstance(ins, dict) and ins.get("enabled", True) and ins.get("in_report", True)):
             return None
@@ -654,14 +682,18 @@ def _insights_section(agg: dict, date_str: str, data_root: str) -> str | None:
         return None
 
 
-def generate_consolidated_md(date_str: str, data_root: str, full_urls: bool = False) -> str:
+def generate_consolidated_md(date_str: str, data_root: str, full_urls: bool = False,
+                             config_path: str | None = None) -> str:
     """生成每日汇总 MD：总览 + 会话统计 + 浏览器访问明细 + 软件清单概要。
 
     这就是"每天一个文件、统计全部数据"的日报主体（写入 report.md）。
     full_urls=True 时不截断浏览器 URL 明细（默认最多 100 条）。
+    config_path 为可选显式配置路径（monitor --config 透传）；缺省时日报链内
+    统一按 _config_for_root 的优先级解析（config_path > <root>/config.json > 全局默认）。
     """
     agg = aggregate(date_str, data_root)
-    browser_data, browser_section = _browser_daily(date_str, data_root, max_rows=None if not full_urls else 10_000)
+    browser_data, browser_section = _browser_daily(date_str, data_root, max_rows=None if not full_urls else 10_000,
+                                                   config_path=config_path)
     inv = _inventory_summary(date_str, data_root)
 
     out: list[str] = []
@@ -708,7 +740,7 @@ def generate_consolidated_md(date_str: str, data_root: str, full_urls: bool = Fa
         out.append("")
 
     # AI 会话深度（可选：ai_sessions.enabled=true 且有数据）
-    ai_section = _ai_sessions_daily(date_str, data_root)
+    ai_section = _ai_sessions_daily(date_str, data_root, config_path=config_path)
     if ai_section:
         out.append(ai_section)
         out.append("")
@@ -727,7 +759,7 @@ def generate_consolidated_md(date_str: str, data_root: str, full_urls: bool = Fa
         out.append(_md_table(["类别", "应用数"], [[cat, str(n)] for cat, n in inv["categories"].items()]))
 
     # 今日建议（离线规则洞察，仅当 insights.enabled && insights.in_report）
-    insights_section = _insights_section(agg, date_str, data_root)
+    insights_section = _insights_section(agg, date_str, data_root, config_path=config_path)
     if insights_section:
         out.append("## 📌 今日建议")
         out.append("")
@@ -739,15 +771,19 @@ def generate_consolidated_md(date_str: str, data_root: str, full_urls: bool = Fa
     return "\n".join(out)
 
 
-def generate_day_report(date_str: str, data_root: str, full_urls: bool = False) -> None:
+def generate_day_report(date_str: str, data_root: str, full_urls: bool = False,
+                        config_path: str | None = None) -> None:
     """把某天的 report.md / report.csv 写入对应日期文件夹。
 
     report.md 为每日汇总文件（总览 + 会话统计 + 浏览器明细 + 软件清单概要）。
+    config_path 可选：显式配置路径（monitor finalize_day 透传 --config）；
+    链内解析优先级见 _config_for_root。
     """
     day_dir = os.path.join(data_root, date_str)
     os.makedirs(day_dir, exist_ok=True)
     with open(os.path.join(day_dir, "report.md"), "w", encoding="utf-8") as fh:
-        fh.write(generate_consolidated_md(date_str, data_root, full_urls=full_urls))
+        fh.write(generate_consolidated_md(date_str, data_root, full_urls=full_urls,
+                                          config_path=config_path))
     with open(os.path.join(day_dir, "report.csv"), "w", encoding="utf-8-sig", newline="") as fh:
         fh.write(generate_report_csv(date_str, data_root))
 

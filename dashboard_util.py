@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import tempfile
+import threading
 import time
 import zipfile
 
@@ -134,6 +135,11 @@ def _safe_extract_zip(data_root: str, zip_bytes: bytes) -> str:
 # ---------------------------------------------------------------------------
 _days_cache: dict[str, dict] = {}  # normcase(abs root) -> {"mtime", "ts", "data"}
 _DAYS_TTL = 5.0  # 秒：mtime 未变化时也强制重扫的最长时间
+# 并发安全（dashboard 为 ThreadingHTTPServer）：一把模块级锁保护日期缓存组的
+# 全部读写（命中读 / 失效丢弃 / 重扫回填）。重扫（os.listdir）也留在锁内：
+# 目录枚举本身很便宜，且可顺带避免并发请求对同一数据根的重复扫描（防惊群）。
+# _days_mtime 只 stat 文件系统、不碰共享表，自身无需持锁。
+_DAYS_LOCK = threading.Lock()
 
 
 def _days_cache_key(data_root: str) -> str:
@@ -152,10 +158,11 @@ def _days_mtime(data_root: str) -> float:
 def invalidate_days_cache(data_root: str | None = None) -> None:
     """强制丢弃日期列表缓存；data_root 为空时清空全部。供写盘场景与测试调用。"""
     global _days_cache
-    if data_root is None:
-        _days_cache.clear()
-    else:
-        _days_cache.pop(_days_cache_key(data_root), None)
+    with _DAYS_LOCK:
+        if data_root is None:
+            _days_cache.clear()
+        else:
+            _days_cache.pop(_days_cache_key(data_root), None)
 
 
 def _available_days(data_root: str) -> list[str]:
@@ -163,23 +170,25 @@ def _available_days(data_root: str) -> list[str]:
 
     目录 mtime 变化或距上次扫描超过 _DAYS_TTL 秒时重扫；否则返回缓存浅拷贝。
     新增日期文件夹会更新目录 mtime，因此缓存失效后可感知新数据。
+    并发：全程持有 _DAYS_LOCK（含重扫），保证查-弃-扫-回填原子。
     """
     key = _days_cache_key(data_root)
-    now = time.monotonic()
-    entry = _days_cache.get(key)
-    if entry is not None and now - entry["ts"] < _DAYS_TTL:
-        if _days_mtime(data_root) == entry["mtime"]:
-            return list(entry["data"])
-        _days_cache.pop(key, None)  # mtime 变化：丢弃旧缓存，走下方重扫
+    with _DAYS_LOCK:
+        now = time.monotonic()
+        entry = _days_cache.get(key)
+        if entry is not None and now - entry["ts"] < _DAYS_TTL:
+            if _days_mtime(data_root) == entry["mtime"]:
+                return list(entry["data"])
+            _days_cache.pop(key, None)  # mtime 变化：丢弃旧缓存，走下方重扫
 
-    days: list[str] = []
-    if os.path.isdir(data_root):
-        for name in os.listdir(data_root):
-            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", name):
-                days.append(name)
-    days.sort()
-    _days_cache[key] = {"mtime": _days_mtime(data_root), "ts": now, "data": days}
-    return list(days)
+        days: list[str] = []
+        if os.path.isdir(data_root):
+            for name in os.listdir(data_root):
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", name):
+                    days.append(name)
+        days.sort()
+        _days_cache[key] = {"mtime": _days_mtime(data_root), "ts": now, "data": days}
+        return list(days)
 
 
 def _collect_known_apps(data_root: str) -> dict[str, str]:

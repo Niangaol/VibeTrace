@@ -173,7 +173,6 @@ def seed_day(root: str, date: str, records: list[dict]) -> str:
     except Exception:  # noqa: BLE001 —— 失效失败不影响造数本身
         pass
     return day_dir
-    return day_dir
 
 
 class ApiClient:
