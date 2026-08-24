@@ -1130,6 +1130,16 @@ function initReveal(){
     });
   });
   mo.observe(document.body, {childList:true, subtree:true});
+  // 保险丝：IO 初始回调可能漏掉已在视口内的元素（后台标签/节流/竞态），
+  // 1.2s 后强制揭开视口内仍未 reveal 的元素，避免内容被 opacity:0 卡住。
+  setTimeout(() => {
+    document.querySelectorAll(".reveal-init:not(.reveal-show)").forEach(el => {
+      const r = el.getBoundingClientRect();
+      if(r.top < innerHeight && r.bottom > 0){
+        el.classList.add("reveal-show");
+      }
+    });
+  }, 1200);
 }
 function bindRipple(){
   document.addEventListener("pointerdown", e => {
@@ -2938,6 +2948,9 @@ function wireUpdate(){
 }
 
 /* ---------- 初始化 ---------- */
+function wireExportButtons(){
+  $$("[data-export]").forEach(b => b.onclick = () => doExport(b.dataset.export, b.dataset.scope));
+}
 function startApp(){
   buildHeadControls();
   applyTheme();
