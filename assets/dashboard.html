@@ -1462,7 +1462,9 @@ async function loadTrends(){
     labels += '<span>'+(hi%4===0 ? String(hi).padStart(2,"0") : "")+'</span>';
   }
   labels += '</div>';
-  box.innerHTML = labels + cols.join("");
+  // 容器必须带 .hm 类：全部热力图规则（.hm .hl-col/.cell 等）都以它为前缀；
+  // 且 hm 内部结构不参与 reveal 动画（避免 MutationObserver 给格子加 reveal-init 卡透明）
+  box.innerHTML = '<div class="hm">' + labels + cols.join("") + '</div>';
   $("#trBars").style.display = "block";
   drawBarChart($("#trBars"), hm.days.slice(-30).map(d=>d.date), hm.days.slice(-30).map(d=>d.total_ms),
     v => v>=3600000 ? (v/3600000).toFixed(1)+"h" : Math.round(v/60000)+"m");
