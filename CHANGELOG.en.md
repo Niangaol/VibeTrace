@@ -8,12 +8,28 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [2.9.0] - 2026-08-25
+
+> Theme: a full visual & interaction upgrade of the dashboard (frontend redesign + polish) plus the batch-2 fixes. First minor release with new features.
+
+### Added
+
+- **Frontend redesign**: systematized design tokens (radius/space/shadow/ease/transition), refined light/dark themes (existing `dash_theme` behavior preserved, second theme toggle added in Settings), and 11 restrained motion effects (staggered view entrance / number count-up / skeleton shimmer / card hover lift / table-row highlight bar / sliding nav indicator / button ripple / progress-bar grow / chart sweep & tooltip fade / scroll reveal / alert pulse), all degraded under `prefers-reduced-motion`; zero third-party dependencies
+- **Model pricing grouped by vendor with collapsible sections**: the built-in price list is auto-grouped into 6 vendor buckets (Anthropic/OpenAI/DeepSeek/Google/Chinese vendors/Others) by key prefix; accordion collapsed by default, click to expand, expand-all/collapse-all supported; adding a new model auto-expands its group and scrolls it into view; all editing/override/reset/delete behaviors preserved as-is
+- **App icons (task-manager style)**: colored rounded icon tiles before app names in overview Top-10 apps / AI tools / contacts, the sessions table and the groups table — 30+ curated brand mappings, everything else falls back to a stable name-hash hue + initial letter; zero dependencies, generated locally
+- **Table & palette polish**: opaque gradient sticky headers, zebra rows, right-aligned numeric columns (time column stays left); new multi-hue palette tokens (--cat-1..6 / soft status colors / gold gradient) applied to vendor dots, stat bars, primary buttons, category tags, etc.
 
 ### Fixed
 
 - **Non-deterministic directory-walk truncation**: `_walk_files` silently cut off at 500 files in os.walk order — machines with many session files got a random per-day subset, and worse, the fingerprint stayed identical so the result cache served subset A's results as valid for subset B (silently wrong numbers). Enumeration now sorts per level (byte-stable), cap raised to 4096 (aligned with parse cache), truncation leaves a module-level counter signal
 - **Weekly/monthly report config flow + dead CLI flag**: `_ai_cost_ledger_md` / `generate_month_report_md` and month/week budget blocks read global defaults on their own, and `--config` was defined in CLI main but never consumed by any report. All now thread `config_path` (priority matches the day-report chain); the dashboard month-report entry passes it through too. Single-day CLI path residue deferred to next batch
+- **Dashboard boot-time blank page from a phantom call (critical)**: `startApp()` had called `wireExportButtons()` since v2.5.0 while its definition was lost during template extraction (the v2.8.2 installer shipped with this too) — a ReferenceError at boot killed every later initialization: no data on open, unresponsive sidebar. The definition is restored (this also fixes the "Export CSV/JSON" buttons that had never been wired), and `initReveal` gained a viewport sweep safety net so panels can never get stuck transparent
+- **Trends heatmap collapsed to bare digits**: the `#trHeatmap` container has been missing the `.hm` class since v2.5.0, so none of the heatmap layout rules ever matched; the old page worked by coincidence until the new animation system's MutationObserver added `reveal-init` (transparent) to the dynamically injected columns — leaving only naked hour labels. The render now wraps output in a `<div class="hm">` container and keeps heatmap internals out of the reveal system
+
+### Tests (2.9.0)
+
+- New `tests/frontend/test_startapp_integrity.py`: statically parses the `startApp()` body and verifies every called identifier has a definition — permanently guards against the "phantom call" class of runtime crashes (negative-proof cases catch removed definitions / missing wiring / removed bootstrap)
+- Established a CDP real-browser acceptance flow (headless Edge driver: zero console errors / pricing accordion interactions / icon rendering / theme switching fully covered)
 
 ## [2.8.2] - 2026-08-23
 
