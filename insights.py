@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import os
 import re
 import sys
@@ -38,6 +39,12 @@ TYPE_LABELS = {
     "balance": "平衡",
     "trend": "趋势",
     "ai": "AI",
+    "project_focus": "项目专注",
+    "tool_switch": "工具切换",
+    "model_diversity": "模型多样",
+    "learning": "学习曲线",
+    "efficiency_stability": "效率稳定",
+    "adoption": "AI 采纳",
 }
 
 _DEFAULT_RULES = {
@@ -46,6 +53,13 @@ _DEFAULT_RULES = {
     "game_alert_hours": 2,
     "study_goal_hours": 1,
     "game_ratio_warn": 0.4,
+    # 新增规则阈值（v2.9.1）
+    "tool_switch_warn_per_hour": 20,
+    "project_focus_hhi_warn": 0.7,
+    "model_diversity_entropy_min": 1.0,
+    "learning_curve_min_growth": 0.05,
+    "efficiency_stability_min": 0.7,
+    "adoption_proxy_warn": 0.3,
 }
 
 # 行为洞察（Phase 4）默认阈值：专注度评分 + 死循环检测
@@ -531,6 +545,84 @@ def rule_insights(agg: dict, config: dict, prev_agg: dict | None = None) -> list
                 ),
             })
 
+    # ---- 项目专注度（HHI）----
+    shares = _project_shares(sessions)
+    if shares:
+        hhi = _hhi(shares)
+        hhi_warn = max(0.0, min(1.0, float(rules.get("project_focus_hhi_warn", 0.7) or 0.7)))
+        if hhi >= hhi_warn:
+            out.append({
+                "type": "project_focus",
+                "severity": "info",
+                "title": TYPE_LABELS["project_focus"],
+                "detail": (
+                    f"项目集中度 HHI={hhi:.2f}（≥{hhi_warn:.2f} 为高度集中），"
+                    "建议在核心项目与学习探索之间保持适度平衡"
+                ),
+            })
+
+    # ---- 工具切换频率 ----
+    if len(sessions) >= 2:
+        ordered = sorted(sessions, key=lambda s: s.get("start") or "")
+        switch_count = 0
+        prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
+        for s in ordered[1:]:
+            cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
+            if cur_tool != prev_tool:
+                switch_count += 1
+            prev_tool = cur_tool
+        total_hours = total / 3600000.0 if total > 0 else 0.0
+        if total_hours > 0:
+            freq = switch_count / total_hours
+            warn_freq = max(1.0, float(rules.get("tool_switch_warn_per_hour", 20) or 20))
+            if freq >= warn_freq:
+                out.append({
+                    "type": "tool_switch",
+                    "severity": "warn",
+                    "title": TYPE_LABELS["tool_switch"],
+                    "detail": (
+                        f"工具切换频率 {freq:.1f} 次/小时（提醒线 {warn_freq:g} 次/小时），"
+                        "过于频繁可能降低深度工作效率，建议批量处理同类任务"
+                    ),
+                })
+
+    # ---- 学习曲线（与昨日对比 AI 时长增长）----
+    if isinstance(prev_agg, dict):
+        prev_ai = int((prev_agg.get("by_ai") or {}).get("total_active_ms") or 0)
+        curr_ai = int((by_ai.get("total_active_ms") or 0) if isinstance(by_ai, dict) else 0)
+        # fallback: 用 total 近似
+        if curr_ai == 0:
+            curr_ai = total
+        if prev_ai > 0 and curr_ai > 0:
+            growth = (curr_ai - prev_ai) / prev_ai
+            min_growth = max(0.0, float(rules.get("learning_curve_min_growth", 0.05) or 0.05))
+            if growth >= min_growth:
+                out.append({
+                    "type": "learning",
+                    "severity": "info",
+                    "title": TYPE_LABELS["learning"],
+                    "detail": (
+                        f"AI 使用时长较昨日增长 {growth * 100:.0f}%，"
+                        "保持使用节奏，注意总结沉淀成可复用经验"
+                    ),
+                })
+
+    # ---- AI 采纳率（AI 编程占活跃时长比例）----
+    ai_ms = int(by_category.get("AI编程", 0) or 0)
+    if total > 0:
+        adoption = ai_ms / total
+        adoption_warn = max(0.0, min(1.0, float(rules.get("adoption_proxy_warn", 0.3) or 0.3)))
+        if adoption >= adoption_warn:
+            out.append({
+                "type": "adoption",
+                "severity": "info",
+                "title": TYPE_LABELS["adoption"],
+                "detail": (
+                    f"AI 采纳率 {adoption * 100:.0f}%（≥{adoption_warn * 100:.0f}%），"
+                    "工具已形成稳定使用习惯，建议尝试更复杂场景以提升效率"
+                ),
+            })
+
     return out
 
 
@@ -681,6 +773,105 @@ def behavior_insights(agg: dict, config: dict | None = None) -> dict:
         "grade": grade,
         "breakdown": breakdown,
         "death_loop": _detect_death_loop(flips, bh),
+    }
+
+
+def _shannon_entropy(counts: list[float]) -> float:
+    """计算 Shannon 熵（bits），用于模型多样性等。"""
+    total = sum(counts)
+    if total <= 0:
+        return 0.0
+    ent = 0.0
+    for c in counts:
+        if c > 0:
+            p = c / total
+            ent -= p * math.log2(p)
+    return round(ent, 3)
+
+
+def _hhi(shares: list[float]) -> float:
+    """赫芬达尔-赫希曼指数（HHI），用于项目/工具集中度。"""
+    return round(sum(s * s for s in shares), 4)
+
+
+def _project_shares(sessions: list[dict]) -> list[float]:
+    """从会话提取 project/cwd/subcategory，返回占比列表（和为 1）。"""
+    buckets: dict[str, float] = {}
+    total = 0.0
+    for s in sessions:
+        key = s.get("project") or s.get("cwd") or s.get("subcategory") or s.get("category") or "其他"
+        dur = int(s.get("duration_ms") or 0)
+        buckets[key] = buckets.get(key, 0.0) + dur
+        total += dur
+    if total <= 0:
+        return []
+    return [v / total for v in buckets.values()]
+
+
+def activitywatch_metrics(agg: dict, config: dict | None = None) -> dict:
+    """ActivityWatch 参考指标（v2.9.1 · 参考实现，公式后续根据真实数据调整）。
+
+    返回 {
+      focus_time: 分钟,
+      switch_entropy: bits,
+      deep_work_min: 分钟,
+      project_focus_hhi: 0-1,
+    }
+    缺数据时返回 None/0 占位。
+    """
+    sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
+    if not sessions:
+        return {
+            "focus_time": 0,
+            "switch_entropy": 0.0,
+            "deep_work_min": 0,
+            "project_focus_hhi": 0.0,
+        }
+
+    # focus_time = 编码类时长 + AI 编程时长
+    by_cat = agg.get("by_category") or {}
+    coding_ms = sum(int(v or 0) for k, v in by_cat.items()
+                    if any(t in str(k) for t in ("AI编程", "开发", "编码", "编程")))
+    focus_time = round(coding_ms / 60000.0, 1)
+
+    # switch_entropy：按应用/工具切换序列计算
+    ordered = sorted(sessions, key=lambda s: s.get("start") or "")
+    apps = [s.get("app") or s.get("exe") or "未知" for s in ordered]
+    app_counts: dict[str, int] = {}
+    for a in apps:
+        app_counts[a] = app_counts.get(a, 0) + 1
+    switch_entropy = _shannon_entropy(list(app_counts.values()))
+
+    # deep_work：连续 ≥15 分钟的编码/AI 会话块
+    deep_work_min = 0.0
+    block_start = None
+    block_dur = 0.0
+    for s in ordered:
+        cat = s.get("category") or ""
+        dur_min = int(s.get("duration_ms") or 0) / 60000.0
+        is_coding = any(t in str(cat) for t in ("AI编程", "开发", "编码", "编程"))
+        if is_coding:
+            if block_start is None:
+                block_start = s.get("start")
+            block_dur += dur_min
+        else:
+            if block_dur >= 15:
+                deep_work_min += block_dur
+            block_start = None
+            block_dur = 0.0
+    if block_dur >= 15:
+        deep_work_min += block_dur
+    deep_work_min = round(deep_work_min, 1)
+
+    # project_focus_hhi
+    shares = _project_shares(sessions)
+    project_focus_hhi = _hhi(shares) if shares else 0.0
+
+    return {
+        "focus_time": focus_time,
+        "switch_entropy": switch_entropy,
+        "deep_work_min": deep_work_min,
+        "project_focus_hhi": project_focus_hhi,
     }
 
 

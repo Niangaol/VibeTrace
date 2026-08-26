@@ -24,6 +24,7 @@ sessions/rounds/quality；前台 minutes 按 usage 会话 title/app/exe 模糊�
 from __future__ import annotations
 
 import datetime
+import math
 from typing import Any
 
 import ai_sessions  # 只读复用（collect / quality_grade）
@@ -219,14 +220,28 @@ def _merge_tool_stats(rows: list[dict]) -> dict:
     return merged
 
 
+def _shannon_entropy(counts: list[float]) -> float:
+    """计算 Shannon 熵（bits）。"""
+    total = sum(counts)
+    if total <= 0:
+        return 0.0
+    ent = 0.0
+    for c in counts:
+        if c > 0:
+            p = c / total
+            ent -= p * math.log2(p)
+    return round(ent, 3)
+
+
 def _derive_metrics(merged: dict, totals: dict) -> dict:
     """按 §2.2 表派生归一化指标 + share_pct + 排序键（纯函数，除零兜底）。
 
     merged: {sessions, minutes, tokens_total, cost_total, generated_chars,
-             generated_lines, quality_avg, grade_dist}
+             generated_lines, quality_avg, grade_dist, by_model, by_project}
     totals: {cost, sessions, tokens} 全工具总和（share_pct 分母）
     派生：cost_per_1k_tokens / chars_per_dollar / chars_per_session /
-          tokens_per_session / share_pct{ cost, sessions, tokens }
+           tokens_per_session / share_pct{ cost, sessions, tokens } /
+           model_diversity_entropy / prompt_efficiency / focus_hhi
     除零规则：tokens_total<=0 → cost_per_1k_tokens=None；cost_total<=1e-9 或
     generated_chars 不可得（None）→ chars_per_dollar=None；sessions==0 → 0。None 排最后。
     """
@@ -234,6 +249,7 @@ def _derive_metrics(merged: dict, totals: dict) -> dict:
     cost = float(merged.get("cost_total") or 0)
     chars = merged.get("generated_chars")
     sessions = int(merged.get("sessions") or 0)
+    generated_lines = int(merged.get("generated_lines") or 0)
 
     merged["cost_per_1k_tokens"] = None if tokens <= 0 else round(cost / tokens * 1000, 4)
     if chars is None:
@@ -244,13 +260,22 @@ def _derive_metrics(merged: dict, totals: dict) -> dict:
         merged["chars_per_session"] = 0.0 if sessions <= 0 else round(chars / sessions, 4)
     merged["tokens_per_session"] = 0.0 if sessions <= 0 else round(tokens / sessions, 4)
 
+    # v2.9.1 新增派生指标
+    by_model = merged.get("by_model") or {}
+    model_counts = [float(v.get("turns") or 0) for v in by_model.values() if isinstance(v, dict)]
+    merged["model_diversity_entropy"] = _shannon_entropy(model_counts) if model_counts else None
+    merged["prompt_efficiency"] = round(generated_lines / sessions, 1) if sessions > 0 else None
+    by_project = merged.get("by_project") or {}
+    proj_shares = [float(v.get("turns") or 0) for v in by_project.values() if isinstance(v, dict)]
+    total_proj = sum(proj_shares)
+    merged["focus_hhi"] = round(sum((s / total_proj) ** 2 for s in proj_shares), 4) if total_proj > 0 else None
+
     share: dict[str, float] = {}
     for key, val in (("cost", cost), ("sessions", float(sessions)), ("tokens", float(tokens))):
         total = float((totals or {}).get(key) or 0)
         share[key] = round(val / total, 4) if total > 1e-9 else 0.0
     merged["share_pct"] = share
     return merged
-
 
 def _sort_tools(tools: list[dict], sort_by: str, top: int) -> list[dict]:
     """按排序键降序（None 排最后），截断 top 行（top<=0 不截断）。"""

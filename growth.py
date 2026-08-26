@@ -39,7 +39,9 @@ _DEFAULT_GROWTH = {
 _SNAPSHOT_NAME = "growth_baseline.json"
 _SCHEMA = 1
 _METRICS = ("focus_score", "quality_avg", "generated_lines",
-            "modify_ratio", "lines_added", "ai_minutes", "saved_minutes")
+            "modify_ratio", "lines_added", "ai_minutes", "saved_minutes",
+            "model_diversity_entropy", "tool_switch_freq", "focus_hhi",
+            "learning_curve", "efficiency_stability", "adoption_proxy", "prompt_efficiency")
 _MIN_EPS = 1e-9
 
 _NOTICE = (
@@ -101,10 +103,14 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
       qs           = ai_collect["total"]["quality_summary"]     # ai_sessions.py:747
       git_t        = git_insights.git_insights(config, date)["total"]
       saved        = insights.time_saved_insights(agg, config)["saved_ms"]
+      aw           = insights.activitywatch_metrics(agg, config)
     汇总结构（§3.3）：
       {week, days, scored_days, focus_score(均值), quality_avg(仅 scored_days>0 的天),
        generated_lines(总和), lines_added(总和), modify_ratio(有 git 数据天的均值|None),
-       ai_minutes(总和分钟), saved_minutes(总和分钟)}
+       ai_minutes(总和分钟), saved_minutes(总和分钟),
+       model_diversity_entropy(日均), tool_switch_freq(日均), project_focus_hhi(日均),
+       learning_curve(周内斜率), efficiency_stability(focus_score 标准差),
+       adoption_proxy(日均), prompt_efficiency(总生成行/总会话数)}
     注意：quality_summary.avg=0 的天不得混入均值分母（scored_days 过滤）；
     modify_ratio 仅统计 git 有产出（found 且 churn>0）的天，无则 None；
     周 key = days[0] 的 ISO 周。纯函数：三源全部 monkeypatch 可测。
@@ -120,8 +126,16 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
     modify_vals: list[float] = []
     ai_minutes = 0.0
     saved_ms = 0
+    entropy_vals: list[float] = []
+    switch_vals: list[float] = []
+    hhi_vals: list[float] = []
+    adoption_vals: list[float] = []
+    ai_sessions_count = 0
+    ai_by_day: list[float] = []
+    aggs: dict[str, dict] = {}
     for day in days:
         agg = report.aggregate(day, data_root)
+        aggs[day] = agg
         focus_vals.append(float(insights.behavior_insights(agg, config)["focus_score"] or 0))
         total = ai_sessions.collect(day, config).get("total") or {}
         qs = total.get("quality_summary") or {}
@@ -129,6 +143,7 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
             quality_vals.append(float(qs.get("avg") or 0))
             scored_days += 1
         generated_lines += int(total.get("generated_lines") or 0)
+        ai_sessions_count += int(total.get("sessions") or 0)
         git_result = git_insights.git_insights(config, day)
         git_total = git_result.get("total") or {}
         lines_added += int(git_total.get("lines_added") or 0)
@@ -137,6 +152,56 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
         ai_minutes += int(by_cat.get("AI编程", 0) or 0) / 60000.0
         saved_ms += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
+        ai_by_day.append(int(by_cat.get("AI编程", 0) or 0) / 60000.0)
+        # v2.9.1 新指标
+        aw = insights.activitywatch_metrics(agg, config)
+        if aw.get("switch_entropy") is not None:
+            entropy_vals.append(float(aw.get("switch_entropy") or 0))
+        sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
+        if sessions:
+            ordered = sorted(sessions, key=lambda s: s.get("start") or "")
+            total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
+            total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
+            if total_hours > 0:
+                switch_count = 0
+                prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
+                for s in ordered[1:]:
+                    cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
+                    if cur_tool != prev_tool:
+                        switch_count += 1
+                    prev_tool = cur_tool
+                switch_vals.append(switch_count / total_hours)
+            shares = insights._project_shares(sessions)
+            if shares:
+                hhi_vals.append(sum(s * s for s in shares))
+        ai_total = int(by_cat.get("AI编程", 0) or 0)
+        total_active = int(agg.get("total_active_ms") or 0)
+        adoption_vals.append(ai_total / total_active if total_active > 0 else 0.0)
+
+    # 学习曲线：周内 AI 时长线性斜率（归一化到 [0,1]）
+    learning_curve = 0.0
+    if len(ai_by_day) >= 2:
+        xs = list(range(len(ai_by_day)))
+        x_mean = sum(xs) / len(xs)
+        y_mean = sum(ai_by_day) / len(ai_by_day)
+        num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ai_by_day))
+        den = sum((x - x_mean) ** 2 for x in xs)
+        if den > 0:
+            learning_curve = num / den / max(abs(y_mean), 1e-9)
+            learning_curve = max(-1.0, min(1.0, learning_curve))
+
+    # 效率稳定性：focus_score 标准差（越小越稳定）
+    efficiency_stability = 0.0
+    if len(focus_vals) >= 2:
+        mean_f = sum(focus_vals) / len(focus_vals)
+        variance = sum((f - mean_f) ** 2 for f in focus_vals) / len(focus_vals)
+        efficiency_stability = round(variance ** 0.5 / 100.0, 3) if mean_f > 0 else 0.0
+
+    # 提示效率：生成行 / AI 会话数
+    prompt_efficiency = 0.0
+    if ai_sessions_count > 0:
+        prompt_efficiency = round(generated_lines / ai_sessions_count, 1)
+
     return {
         "week": _week_key(datetime.date.fromisoformat(days[0])),
         "days": len(days),
@@ -148,6 +213,13 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         "modify_ratio": round(sum(modify_vals) / len(modify_vals), 2) if modify_vals else None,
         "ai_minutes": round(ai_minutes, 1),
         "saved_minutes": int(round(saved_ms / 60000.0)),
+        "model_diversity_entropy": round(sum(entropy_vals) / len(entropy_vals), 3) if entropy_vals else None,
+        "tool_switch_freq": round(sum(switch_vals) / len(switch_vals), 1) if switch_vals else None,
+        "focus_hhi": round(sum(hhi_vals) / len(hhi_vals), 4) if hhi_vals else None,
+        "learning_curve": round(learning_curve, 3),
+        "efficiency_stability": efficiency_stability,
+        "adoption_proxy": round(sum(adoption_vals) / len(adoption_vals), 3) if adoption_vals else None,
+        "prompt_efficiency": prompt_efficiency,
     }
 
 
@@ -277,6 +349,11 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
     modify_delta: list[float] = []
     ai_minutes_delta = 0.0
     saved_ms_delta = 0
+    entropy_delta: list[float] = []
+    switch_delta: list[float] = []
+    hhi_delta: list[float] = []
+    adoption_delta: list[float] = []
+    ai_sessions_delta = 0
     for day in delta_days:
         agg = report.aggregate(day, data_root)
         focus_delta.append(float(insights.behavior_insights(agg, config)["focus_score"] or 0))
@@ -286,6 +363,7 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
             quality_delta.append(float(qs.get("avg") or 0))
             scored_delta += 1
         generated_delta += int(total.get("generated_lines") or 0)
+        ai_sessions_delta += int(total.get("sessions") or 0)
         git_result = git_insights.git_insights(config, day)
         git_total = git_result.get("total") or {}
         lines_added_delta += int(git_total.get("lines_added") or 0)
@@ -294,6 +372,30 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
         ai_minutes_delta += int(by_cat.get("AI编程", 0) or 0) / 60000.0
         saved_ms_delta += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
+        # v2.9.1 新指标
+        aw = insights.activitywatch_metrics(agg, config)
+        if aw.get("switch_entropy") is not None:
+            entropy_delta.append(float(aw.get("switch_entropy") or 0))
+        sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
+        if sessions:
+            ordered = sorted(sessions, key=lambda s: s.get("start") or "")
+            total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
+            total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
+            if total_hours > 0:
+                switch_count = 0
+                prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
+                for s in ordered[1:]:
+                    cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
+                    if cur_tool != prev_tool:
+                        switch_count += 1
+                    prev_tool = cur_tool
+                switch_delta.append(switch_count / total_hours)
+            shares = insights._project_shares(sessions)
+            if shares:
+                hhi_delta.append(sum(s * s for s in shares))
+        ai_total = int(by_cat.get("AI编程", 0) or 0)
+        total_active = int(agg.get("total_active_ms") or 0)
+        adoption_delta.append(ai_total / total_active if total_active > 0 else 0.0)
     # 合并
     # focus_score 均值
     old_focus = float(old.get("focus_score") or 0)
@@ -321,6 +423,12 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         new_modify = old_mod
     new_ai = round(float(old.get("ai_minutes") or 0) + ai_minutes_delta, 1)
     new_saved = int(round((int(old.get("saved_minutes") or 0) * 60000 + saved_ms_delta) / 60000.0))
+    # v2.9.1 新指标：简单均值/总和合并
+    new_entropy = round((float(old.get("model_diversity_entropy") or 0) * old_days + sum(entropy_delta)) / new_days, 3) if entropy_delta else old.get("model_diversity_entropy")
+    new_switch = round((float(old.get("tool_switch_freq") or 0) * old_days + sum(switch_delta)) / new_days, 1) if switch_delta else old.get("tool_switch_freq")
+    new_hhi = round((float(old.get("focus_hhi") or 0) * old_days + sum(hhi_delta)) / new_days, 4) if hhi_delta else old.get("focus_hhi")
+    new_adoption = round((float(old.get("adoption_proxy") or 0) * old_days + sum(adoption_delta)) / new_days, 3) if adoption_delta else old.get("adoption_proxy")
+    new_prompt_eff = round((int(old.get("prompt_efficiency") or 0) * old.get("days", 1) + generated_delta) / max(1, int(old.get("ai_sessions") or 0) + ai_sessions_delta), 1) if (generated_delta or int(old.get("ai_sessions") or 0)) else old.get("prompt_efficiency")
     merged = dict(old)
     merged.update({
         "days": new_days,
@@ -332,6 +440,12 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         "modify_ratio": new_modify,
         "ai_minutes": new_ai,
         "saved_minutes": new_saved,
+        "model_diversity_entropy": new_entropy,
+        "tool_switch_freq": new_switch,
+        "project_focus_hhi": new_hhi,
+        "adoption_proxy": new_adoption,
+        "prompt_efficiency": new_prompt_eff,
+        # learning_curve 和 efficiency_stability 为跨周指标，增量合并暂不计算，保留旧值
     })
     # week 保持不变
     return merged

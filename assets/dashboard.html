@@ -606,7 +606,7 @@
         </div>
         <div style="margin-bottom:14px"><canvas id="grChart" height="300"></canvas></div>
         <div id="grTrend" style="margin-top:8px"></div>
-        <div class="hint" style="margin-top:10px">周均值为本地估算（focus/quality 为离线规则打分；git 未配置时 modify_ratio 缺失）；快照只存周均值，不存明细，删除快照文件可自动重建。</div>
+        <div class="hint" style="margin-top:10px">周均值为本地估算（focus/quality 为离线规则打分；git 未配置时 modify_ratio 缺失）；快照只存周均值，不存明细，删除快照文件可自动重建。含模型多样熵、工具切换频率、项目集中度等 v2.9.1 指标。</div>
       </div>
     </section>
 
@@ -623,7 +623,7 @@
           <span class="hint" id="cmpMeta" style="color:var(--faint);font-size:11.5px"></span>
         </div>
         <div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>工具</th><th>会话</th><th>轮次</th><th>分钟</th><th>Token</th><th>成本</th><th>字符/美元</th><th>质量均分</th><th>成本占比</th></tr></thead>
+          <thead><tr><th>工具</th><th>会话</th><th>轮次</th><th>分钟</th><th>Token</th><th>成本</th><th>字符/美元</th><th>质量均分</th><th>成本占比</th><th>模型多样熵</th><th>提示效率</th><th>项目集中度</th></tr></thead>
           <tbody id="cmpBody"></tbody>
         </table></div>
         <div class="set-note" id="cmpNotice" style="margin-top:10px"></div>
@@ -1848,7 +1848,7 @@ function priceVendorOf(k){
   if(s.startsWith("gpt") || /^o\d/.test(s) || s.startsWith("codex")) return "openai";
   if(s.startsWith("deepseek")) return "deepseek";
   if(s.startsWith("gemini")) return "google";
-  if(/^(qwen|glm|chatglm|kimi|moonshot|doubao|ernie|hunyuan)([._/-]|$)/.test(s)) return "cn";
+  if(/^(qwen|glm|chatglm|kimi|moonshot|doubao|ernie|hunyuan|dsh)([._/-]|$)/.test(s)) return "cn";
   return "other";
 }
 
@@ -2045,6 +2045,8 @@ function renderSessions(sessions, agg){
 
 /* ---------- 时间轴回放（v2.5） ---------- */
 async function loadTimeline(){
+  const box = $("#tlBody");
+  if(box) box.innerHTML = skeleton(12);
   const d = await api("/api/timeline?date=" + state.day);
   renderTimeline(d.events || [], d.summary || {});
 }
@@ -2102,10 +2104,15 @@ let growW = 8;
 const GROW_LABEL = {
   focus_score:"专注度", quality_avg:"会话质量", generated_lines:"AI 产出行",
   modify_ratio:"修改率", lines_added:"代码新增行", ai_minutes:"AI 时长(分)",
-  saved_minutes:"节省时间(分)"
+  saved_minutes:"节省时间(分)", model_diversity_entropy:"模型多样熵",
+  tool_switch_freq:"工具切换(次/小时)", focus_hhi:"项目集中度(HHI)",
+  learning_curve:"学习曲线", efficiency_stability:"效率稳定度",
+  adoption_proxy:"AI 采纳率", prompt_efficiency:"提示效率(行/会话)"
 };
 async function loadGrowth(){
   const w = growW || 8;
+  const box = $("#grTrend");
+  if(box) box.innerHTML = skeleton(8);
   const d = await api("/api/trend?weeks=" + w);
   renderGrowth(d);
 }
@@ -2258,6 +2265,8 @@ async function loadCompare(){
   const proj = ($("#cmpProject") && $("#cmpProject").value.trim()) || "";
   let url = "/api/ai-compare?start=" + iso(startD) + "&end=" + iso(endD);
   if(proj) url += "&project=" + encodeURIComponent(proj);
+  const body = $("#cmpBody");
+  if(body) body.innerHTML = '<tr><td colspan="11"><div class="empty">正在加载对比数据…</div></td></tr>';
   const d = await api(url);
   renderCompare(d);
 }
@@ -2283,7 +2292,10 @@ function renderCompare(d){
       '<td class="num">' + esc(fmtCost(t.cost_total)) + '</td>' +
       '<td class="num">' + cmpNum(t.chars_per_dollar) + '</td>' +
       '<td class="num">' + cmpNum(t.quality_avg, 1) + '</td>' +
-      '<td class="num">' + esc(share) + '</td></tr>';
+      '<td class="num">' + esc(share) + '</td>' +
+      '<td class="num">' + cmpNum(t.model_diversity_entropy, 2) + '</td>' +
+      '<td class="num">' + cmpNum(t.prompt_efficiency, 1) + '</td>' +
+      '<td class="num">' + cmpNum(t.focus_hhi, 3) + '</td></tr>';
   }).join("");
 }
 function bindCompareControls(){

@@ -96,7 +96,58 @@ _DEFAULT_PATHS: dict[str, list[str]] = {
         "~/.dsh",
         "%LOCALAPPDATA%/dsh",
     ],
+    "qwen": [
+        "%APPDATA%/Qwen",
+        "%LOCALAPPDATA%/Qwen",
+        "~/.qwen",
+    ],
+    "glm": [
+        "%APPDATA%/zhipu",
+        "%LOCALAPPDATA%/GLM",
+        "~/.glm",
+    ],
+    "doubao": [
+        "%APPDATA%/Doubao",
+        "%LOCALAPPDATA%/Doubao",
+        "~/.doubao",
+    ],
+    "kimi": [
+        "%APPDATA%/Kimi",
+        "%LOCALAPPDATA%/Kimi",
+        "~/.kimi",
+    ],
+    "marscode": [
+        "%APPDATA%/Marscode",
+        "%LOCALAPPDATA%/Marscode",
+        "~/.marscode",
+    ],
+    "codebuddy": [
+        "%APPDATA%/CodeBuddy",
+        "%LOCALAPPDATA%/CodeBuddy",
+        "~/.codebuddy",
+    ],
+    "minimax": [
+        "%APPDATA%/MiniMax",
+        "%LOCALAPPDATA%/MiniMax",
+        "~/.minimax",
+    ],
+    "stepfun": [
+        "%APPDATA%/StepFun",
+        "%LOCALAPPDATA%/StepFun",
+        "~/.step",
+    ],
+    "yi": [
+        "%APPDATA%/Yi",
+        "%LOCALAPPDATA%/Yi",
+        "~/.yi",
+    ],
+    "baichuan": [
+        "%APPDATA%/Baichuan",
+        "%LOCALAPPDATA%/Baichuan",
+        "~/.baichuan",
+    ],
 }
+
 
 # 时间字段候选
 _TIME_KEYS = ("timestamp", "created_at", "time", "date", "ts", "created")
@@ -112,28 +163,35 @@ _ASSISTANT_ROLES = ("assistant", "ai", "bot", "model", "agent", "assistant_msg",
 # 模型字段候选（含嵌套 response/model；不含通用 name，避免误把用户名/函数名当模型）
 _MODEL_KEYS = ("model", "model_name", "model_id", "modelId", "model_id_str")
 # 已知模型名正则（内容里的模型名识别按贪婪先后顺序；大小写不敏感）
+# 防误伤规则：通用词加长度/边界限制，确保匹配到真实模型名而非普通文本。
 _KNOWN_MODEL_RE = re.compile(
-    r"(?:claude[- ][34](?:\.[0-9])?(?:-[\w.-]+)?"
-    r"|claude-(?:opus|sonnet|haiku)[- 0-9.-]*"
-    r"|gpt[-_ ]?(?:5|4o|4\.5|4|3\.5|3)[\w.-]*"
-    r"|o[134](?:-mini)?[\w.-]*"
-    r"|deepseek[-_ ]?(?:chat|reasoner|r1|v3?|coder|math)[\w.-]*"
-    r"|gemini[- ][0-9](?:\.[0-9])?[\w.-]*"
-    r"|qwen(?:\d+-)?[\w.-]*"
-    r"|llama[- ][0-9][\w.-]*"
-    r"|mistral(?:-large|-medium|-small|-nemo)?[\w.-]*"
+    r"(?:gpt[-_ ]?5(?:\.\d+)?[\w.-]*"      # gpt-5.x 全家族（允许裸 gpt-5）
+    r"|gpt[-_ ]?(?:4o|4\.5|4\.1|4|3\.5|3\.1|3)[\w.-]*"
+    r"|o[134](?:-mini|-pro)?[\w.-]*"
+    r"|claude[- ](?:5(?:\.[0-9]+)?|4(?:\.[0-9]+)?|3(?:\.[0-9]+)?)(?:-[\w.-]+)?"
+    r"|claude-(?:opus|sonnet|haiku|mythos)[- 0-9.\w-]*"
+    r"|gemini[- ](?:3\.[6-9]|3\.[0-5]|3|2\.[5-9]|2\.[0-4]|1\.5|1)[\w.-]*"
+    r"|gemma(?:[- ][0-9][\w.-]*)?"
+    r"|deepseek(?:[-_ ]?(?:v[34]|chat|reasoner|r1|coder|math))?[\w.-]*"
+    r"|qwen(?:3|2\.5|-max|-plus|-turbo|-long)?[\w.-]*"
+    r"|glm[-_ ]?(?:5\.[0-9]|4\.[0-9]|4)?[\w.-]*"
+    r"|kimi[- ]?(?:k3|v3|moonshot)?[\w.-]*"
+    r"|moonshot[- ]?(?:v3|ai)?[\w.-]*"
+    r"|minimax[- ]?(?:m[23](?:\.\d+)?|ai|text)?[\w.-]*"
+    r"|mistral(?:[- ]?(?:3|large[- ]?3|medium[- ]?3\.5|2\.5|small|nemo|codestral))?[\w.-]*"
     r"|codestral[\w.-]*"
-    r"|moonshot[\w.-]*"
-    r"|kimi[\w.-]*"
-    r"|glm[-_ ]?[0-9][\w.-]*"
+    r"|llama[- ]?[0-9]?[\w.-]*"
+    r"|grok[- ]?(?:4\.1|4[- ]heavy|4|3|2|1)?[\w.-]*"
+    r"|ernie[- ]?(?:4\.5|5|4|3|speed|turbo|lite)?[\w.-]*"
+    r"|step[- ]?(?:[12]|fun|turbo|mini|flash)?[\w.-]*"
+    r"|yi[- ]?(?:large|medium|spark|light|vision|coder)?[\w.-]*"
+    r"|baichuan[- ]?(?:[234]|turbo|wide|agent|m1)?[\w.-]*"
     r"|doubao[\w.-]*"
     r"|spark[\w.-]*"
-    r"|ernie[\w.-]*"
-    r"|command(?:-r|-a)?[\w.-]*"
+    r"|command(?:-r|-a|-plus)?[\w.-]*"
     r"|codex(?:[- ][\w.-]+)?"
-    r"|grok[- ][0-9][\w.-]*"
-    r"|llama[\w.-]*"
-    r"|gemma[\w.-]*)",
+    r"|hunyuan[\w.-]*"
+    r")",
     re.IGNORECASE,
 )
 
@@ -152,7 +210,6 @@ _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff\u3040-\u30ff\uac
 # config 的 ai_sessions.costs.model_pricing 覆盖/补充（键为模型名子串，小写）。
 _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
     # —— Anthropic（USD/百万 Token：输入, 输出）——
-    "claude-fable-5": (10.0, 50.0),
     "claude-opus-5": (5.0, 25.0),
     "claude-opus": (5.0, 25.0),          # Opus 4.x
     "claude-sonnet-5": (2.0, 10.0),
@@ -160,6 +217,7 @@ _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
     "claude-3-5-sonnet": (3.0, 15.0),
     "claude-haiku-4-5": (1.0, 5.0),
     "claude-haiku": (0.25, 1.25),
+    "claude-mythos": (6.0, 30.0),        # Mythos 5 系列
     # —— OpenAI ——
     "gpt-5.5": (5.0, 30.0),
     "gpt-5.4-mini": (0.75, 4.5),
@@ -192,31 +250,61 @@ _DEFAULT_PRICING: dict[str, tuple[float, float]] = {
     "gemini-3.1-pro": (2.0, 12.0),
     "gemini-3-flash-lite": (0.30, 2.50),
     "gemini-3-flash": (0.50, 3.0),
+    "gemini-3-pro": (2.0, 12.0),        # 3.x 标准版
     "gemini-2.5-flash-lite": (0.10, 0.40),
     "gemini-2.5-flash": (0.30, 2.50),
     "gemini-2.5-pro": (1.25, 10.0),
+    "gemini-2-flash": (0.30, 2.50),
+    "gemini-2-pro": (1.0, 8.0),
+    "gemma-3": (0.20, 0.60),            # Gemma 3 系列
+    "gemma-2": (0.20, 0.60),
+    "gemma": (0.20, 0.60),              # 通用
     # —— 国内模型（约合 USD）——
-    "qwen-max": (1.6, 6.4),
     "qwen3-max": (0.50, 5.0),
+    "qwen3": (0.30, 0.60),              # Qwen3 通义千问
+    "qwen2.5": (0.20, 0.40),            # Qwen 2.5 系列
+    "qwen-max": (1.6, 6.4),
     "qwen-plus": (0.8, 2.0),
     "qwen-turbo": (0.3, 0.6),
+    "qwen-long": (0.20, 0.60),
+    "glm-5.2": (0.85, 3.4),
     "glm-5": (0.85, 3.4),
+    "glm-4.7": (0.50, 1.40),
+    "glm-4.6": (0.50, 1.40),
     "glm-4": (0.50, 1.40),
+    "kimi-k3": (1.0, 3.0),             # Kimi K3
     "kimi": (1.0, 3.0),
+    "moonshot-v3": (1.0, 3.0),          # Moonshot V3
     "moonshot": (1.0, 3.0),
     "doubao": (0.30, 0.60),
+    "ernie-5": (0.57, 2.57),
+    "ernie-4.5": (0.57, 2.57),
     "ernie": (0.57, 2.57),
     "hunyuan": (0.20, 0.90),
     # —— 其他 ——
+    "grok-4.1": (1.25, 2.5),
+    "grok-4-heavy": (1.25, 2.5),
     "grok-4": (1.25, 2.5),
     "grok-3": (3.0, 15.0),
+    "grok-2": (2.0, 10.0),
+    "mistral-large-3": (2.0, 6.0),
     "mistral-large": (2.0, 6.0),
-    "codestral": (0.30, 0.90),
+    "mistral-medium-3.5": (1.0, 3.0),
+    "mistral-3": (1.0, 3.0),           # Mistral 3 系列
     "mistral-small": (0.20, 0.60),
+    "codestral": (0.30, 0.90),
     "llama-4": (0.20, 0.40),
     "llama-3": (0.50, 0.75),
-    "gemma": (0.20, 0.60),
+    "minimax-m3": (0.20, 0.60),
+    "minimax-m2.7": (0.15, 0.50),
+    "minimax": (0.20, 0.60),
     "command-r": (0.15, 0.60),
+    "command-a": (0.20, 0.80),
+    "step-1": (0.50, 2.0),             # 阶跃星辰 Step
+    "yi-large": (1.0, 3.0),            # 零一万物 Yi
+    "yi": (1.0, 3.0),
+    "baichuan-4": (0.50, 1.50),        # 百川 Baichuan
+    "baichuan": (0.50, 1.50),
     # 定价随时变动，以上为“量级参考”。请用 config 的
     # ai_sessions.costs.model_pricing 或数据目录 ai_pricing.json 覆盖。
 }
@@ -648,8 +736,20 @@ def _message_model(msg: dict) -> str:
 
 
 def _clean_model(raw: str) -> str:
-    """归一化模型名（去掉引号/换行/前后空格，截断过长值）。"""
-    name = re.sub(r"[\"'`\r\n]+", " ", raw).strip()
+    """归一化模型名（小写、去引号/换行、去日期/包装后缀、截断过长值）。
+
+    保留模型语义后缀（-pro/-flash/-lite/-plus/-long/-chat/-coder/-math/-reasoner/-r1/-v3/-v4 等），
+    只去掉包装/日期类无意义后缀，避免把模型身份信息也抹掉。
+    """
+    name = re.sub(r"[\"'`\r\n]+", " ", raw).strip().lower()
+    # 日期后缀
+    name = re.sub(r"[-_]\d{4}[-_]\d{2}[-_]\d{2}$", "", name)
+    name = re.sub(r"[-_]\d{6,8}$", "", name)
+    # 包装后缀（只去这些，其余保留）
+    for suffix in ("-preview", "-latest", "-custom"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
     return name[:48] or "未识别"
 
 

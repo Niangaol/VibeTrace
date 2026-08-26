@@ -8,6 +8,22 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [2.9.1] - 2026-08-26
+
+### 新特性
+- **成长/对比指标扩展**：新增 model_diversity_entropy、tool_switch_freq、focus_hhi、learning_curve、efficiency_stability、adoption_proxy、prompt_efficiency 七类指标，后端 growth/tool_compare/insights 全链路打通，前端趋势卡与对比表自动适配
+- **Git 深度分析**：git_insights.py 新增 auto_discover_repos（递归≤3 自动发现子仓库）与 analyze_repo_deep（author_detail/commit_rhythm/language_dist/deep_work_blocks/adoption_proxy），配置开关 `insights.git.auto_discover` / `insights.git.deep`
+- **模型与 agent 覆盖扩展**：ai_sessions.py 正则扩至 60+ 模型、29 个 agent 路径、90 条定价；classifier/config 新增 DSH Desktop 等关键词与路径映射
+- **ActivityWatch 参考指标**：insights.py 新增 activitywatch_metrics()（focus_time/switch_entropy/deep_work/project_focus_hhi），规则引擎新增 6 类洞察（project_focus/tool_switch/model_diversity/learning/efficiency_stability/adoption）
+
+### 修复
+- **AI 时间轴/成长/对比加载态**：timeline、growth、compare 三个视图新增骨架屏/加载提示，避免空白等待
+- **DSH 前端厂商归类**：dashboard.html priceVendorOf 新增 dsh 前缀映射，定价页正确归类为国内模型
+
+### 测试（2.9.1）
+- 新增 4 个单元测试文件共 137 个函数（model_regex/pricing_table/agent_paths/git_auto_discover）
+- 全量回归 643 passed, 0 failed
+
 ## [2.9.0] - 2026-08-25
 
 > 主题：仪表盘全面视觉与交互升级（前端重做 + 精修）+ 批次二修复。首个含新特性的 minor 版本。

@@ -8,6 +8,22 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [2.9.1] - 2026-08-26
+
+### Added
+- **Growth/compare metrics expansion**: seven new indicators (model_diversity_entropy, tool_switch_freq, focus_hhi, learning_curve, efficiency_stability, adoption_proxy, prompt_efficiency) fully wired through backend growth/tool_compare/insights; frontend trend cards and compare table auto-adapt
+- **Git deep analysis**: git_insights.py gains auto_discover_repos (recursive depth ≤3) and analyze_repo_deep (author_detail/commit_rhythm/language_dist/deep_work_blocks/adoption_proxy); toggles `insights.git.auto_discover` / `insights.git.deep`
+- **Model & agent coverage**: ai_sessions.py regex expanded to 60+ models, 29 agent paths, 90 pricing entries; classifier/config add DSH Desktop keywords and session paths
+- **ActivityWatch reference metrics**: insights.py adds activitywatch_metrics() (focus_time/switch_entropy/deep_work/project_focus_hhi); rule engine adds 6 insight types (project_focus/tool_switch/model_diversity/learning/efficiency_stability/adoption)
+
+### Fixed
+- **AI timeline / growth / compare loading states**: skeleton/loading text added to all three views
+- **DSH vendor mapping**: dashboard.html priceVendorOf now maps dsh prefix to Chinese vendors
+
+### Tests (2.9.1)
+- 4 new unit test files, 137 new functions (model_regex/pricing_table/agent_paths/git_auto_discover)
+- Full regression 643 passed, 0 failed
+
 ## [2.9.0] - 2026-08-25
 
 > Theme: a full visual & interaction upgrade of the dashboard (frontend redesign + polish) plus the batch-2 fixes. First minor release with new features.
