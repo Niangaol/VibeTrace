@@ -132,10 +132,8 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
     adoption_vals: list[float] = []
     ai_sessions_count = 0
     ai_by_day: list[float] = []
-    aggs: dict[str, dict] = {}
     for day in days:
         agg = report.aggregate(day, data_root)
-        aggs[day] = agg
         focus_vals.append(float(insights.behavior_insights(agg, config)["focus_score"] or 0))
         total = ai_sessions.collect(day, config).get("total") or {}
         qs = total.get("quality_summary") or {}
@@ -154,9 +152,10 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         saved_ms += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
         ai_by_day.append(int(by_cat.get("AI编程", 0) or 0) / 60000.0)
         # v2.9.1 新指标
-        aw = insights.activitywatch_metrics(agg, config)
-        if aw.get("switch_entropy") is not None:
-            entropy_vals.append(float(aw.get("switch_entropy") or 0))
+        by_model = agg.get("by_model") if isinstance(agg.get("by_model"), dict) else {}
+        if by_model:
+            model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
+            entropy_vals.append(insights._shannon_entropy(model_counts))
         sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
         if sessions:
             ordered = sorted(sessions, key=lambda s: s.get("start") or "")
@@ -372,10 +371,11 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
         ai_minutes_delta += int(by_cat.get("AI编程", 0) or 0) / 60000.0
         saved_ms_delta += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
-        # v2.9.1 新指标
-        aw = insights.activitywatch_metrics(agg, config)
-        if aw.get("switch_entropy") is not None:
-            entropy_delta.append(float(aw.get("switch_entropy") or 0))
+        # v2.9.1 新指标：模型多样熵改用 by_model 轮次 Shannon 熵（与 _aggregate_week 一致）
+        by_model = agg.get("by_model") if isinstance(agg.get("by_model"), dict) else {}
+        if by_model:
+            model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
+            entropy_delta.append(insights._shannon_entropy(model_counts))
         sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
         if sessions:
             ordered = sorted(sessions, key=lambda s: s.get("start") or "")

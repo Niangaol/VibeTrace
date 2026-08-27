@@ -24,6 +24,18 @@
 - 新增 4 个单元测试文件共 137 个函数（model_regex/pricing_table/agent_paths/git_auto_discover）
 - 全量回归 643 passed, 0 failed
 
+## [2.9.2] - 2026-08-26
+
+### 修复
+- **Git 深度分析崩溃**：analyze_repo_deep 使用 `_parse_numstat` 返回的 `date` 字段（ISO 字符串），但代码误用 `c.get("ts")` 始终取到 None，导致 `ts_sorted` 未赋值即引用 → UnboundLocalError。开启 `insights.git.deep: true` 时任何有提交的仓库直接崩溃。修复：统一解析 `date` → `fromisoformat().timestamp()`，`ts_sorted` 前置初始化为 `[]`，补 `import datetime`
+- **学习曲线洞察死代码**：`rule_insights` 学习规则读取 `(prev_agg.get("by_ai") or {}).get("total_active_ms")`，但 `by_ai` 是 `{tool: ms}` 扁平映射，该键永远不存在 → prev_ai/curr_ai 恒为 0 → 规则永不触发。修复：改为 `sum(...values())`
+- **成长指标张冠李戴**：`_aggregate_week` 中 `model_diversity_entropy` 实际塞入的是 app 切换熵（activitywatch_metrics 的 `switch_entropy`），不是模型多样熵。`_merge_incremental` 增量路径也存在同样问题。修复：两处统一改为从 `by_model` 的 `turns` 字段计算 Shannon 熵
+- **对比视图加载态/空态 colspan 不一致**：加载态 `colspan="11"` 而表头 12 列、空态已改 12。修复：加载态也改为 `colspan="12"`
+- **增量合并死变量**：`_merge_incremental` 中 `aggs` 循环赋值但从未读取。修复：移除
+
+### 测试（2.9.2）
+- 全量回归 643 passed, 0 failed
+
 ## [2.9.0] - 2026-08-25
 
 > 主题：仪表盘全面视觉与交互升级（前端重做 + 精修）+ 批次二修复。首个含新特性的 minor 版本。

@@ -2266,7 +2266,7 @@ async function loadCompare(){
   let url = "/api/ai-compare?start=" + iso(startD) + "&end=" + iso(endD);
   if(proj) url += "&project=" + encodeURIComponent(proj);
   const body = $("#cmpBody");
-  if(body) body.innerHTML = '<tr><td colspan="11"><div class="empty">正在加载对比数据…</div></td></tr>';
+  if(body) body.innerHTML = '<tr><td colspan="12"><div class="empty">正在加载对比数据…</div></td></tr>';
   const d = await api(url);
   renderCompare(d);
 }
@@ -2279,7 +2279,7 @@ function renderCompare(d){
   if(!body) return;
   const tools = d.tools || [];
   if(!tools.length){
-    body.innerHTML = '<tr><td colspan="9"><div class="empty">无数据：该区间未解析到 AI 会话（或项目过滤未命中）。</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="12"><div class="empty">无数据：该区间未解析到 AI 会话（或项目过滤未命中）。</div></td></tr>';
     return;
   }
   body.innerHTML = tools.map(t => {

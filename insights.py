@@ -588,8 +588,8 @@ def rule_insights(agg: dict, config: dict, prev_agg: dict | None = None) -> list
 
     # ---- 学习曲线（与昨日对比 AI 时长增长）----
     if isinstance(prev_agg, dict):
-        prev_ai = int((prev_agg.get("by_ai") or {}).get("total_active_ms") or 0)
-        curr_ai = int((by_ai.get("total_active_ms") or 0) if isinstance(by_ai, dict) else 0)
+        prev_ai = int(sum((prev_agg.get("by_ai") or {}).values()) or 0)
+        curr_ai = int(sum((by_ai or {}).values()) or 0)
         # fallback: 用 total 近似
         if curr_ai == 0:
             curr_ai = total

@@ -17,6 +17,7 @@ CLI：python git_insights.py --day 2026-08-18 [--config path] [--json]
 from __future__ import annotations
 
 import argparse
+import datetime
 import json
 import os
 import subprocess
@@ -230,7 +231,13 @@ def analyze_repo_deep(repo: dict, day_str: str, timeout: float, top_files: int,
             entry["additions"] += f.get("added", 0)
             entry["deletions"] += f.get("deleted", 0)
             entry["files_touched"] += 1
-        ts = c.get("ts")
+        ts_str = c.get("date")
+        ts = None
+        if ts_str:
+            try:
+                ts = datetime.datetime.fromisoformat(ts_str).timestamp()
+            except (OSError, ValueError, TypeError):
+                pass
         if ts is not None:
             if entry["first_ts"] is None or ts < entry["first_ts"]:
                 entry["first_ts"] = ts
@@ -242,7 +249,13 @@ def analyze_repo_deep(repo: dict, day_str: str, timeout: float, top_files: int,
     hour_counts: dict[int, int] = {}
     ts_list: list[float] = []
     for c in commits:
-        ts = c.get("ts")
+        ts_str = c.get("date")
+        ts = None
+        if ts_str:
+            try:
+                ts = datetime.datetime.fromisoformat(ts_str).timestamp()
+            except (OSError, ValueError, TypeError):
+                pass
         if ts is not None:
             ts_list.append(ts)
             try:
@@ -252,6 +265,7 @@ def analyze_repo_deep(repo: dict, day_str: str, timeout: float, top_files: int,
                 pass
     peak_hour = max(hour_counts, key=hour_counts.get) if hour_counts else None
     avg_interval = None
+    ts_sorted: list[float] = []
     if len(ts_list) >= 2:
         ts_sorted = sorted(ts_list)
         intervals = [ts_sorted[i+1] - ts_sorted[i] for i in range(len(ts_sorted)-1)]

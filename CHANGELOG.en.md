@@ -24,6 +24,18 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 - 4 new unit test files, 137 new functions (model_regex/pricing_table/agent_paths/git_auto_discover)
 - Full regression 643 passed, 0 failed
 
+## [2.9.2] - 2026-08-26
+
+### Fixed
+- **Git deep analysis crash**: `analyze_repo_deep` used `c.get("ts")` but `_parse_numstat` produces `date` (ISO string), so ts was always None → `UnboundLocalError` on `ts_sorted`. With `insights.git.deep: true`, any repo with commits crashed. Fix: parse `date` via `fromisoformat().timestamp()`, initialize `ts_sorted = []`, add `import datetime`
+- **Learning insight dead code**: `rule_insights` learning rule read `(prev_agg.get("by_ai") or {}).get("total_active_ms")`, but `by_ai` is a flat `{tool: ms}` mapping → key never exists → prev_ai/curr_ai always 0 → rule never fires. Fix: use `sum(...values())`
+- **Growth metric misattribution**: `_aggregate_week` populated `model_diversity_entropy` with app switch entropy (activitywatch_metrics `switch_entropy`), not model diversity entropy. `_merge_incremental` had the same bug. Fix: both paths now compute Shannon entropy from `by_model` turns
+- **Compare view colspan mismatch**: loading state used `colspan="11"` while header has 12 columns and empty state was already 12. Fix: loading state also `colspan="12"`
+- **Dead variable in incremental merge**: `aggs` dict populated but never read in `_merge_incremental`. Fix: removed
+
+### Tests (2.9.2)
+- Full regression 643 passed, 0 failed
+
 ## [2.9.0] - 2026-08-25
 
 > Theme: a full visual & interaction upgrade of the dashboard (frontend redesign + polish) plus the batch-2 fixes. First minor release with new features.
