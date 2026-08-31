@@ -607,6 +607,7 @@
     "amazon-q",
     "q",
     "dsh",
+    "zcode",
     "pi",
     "claude-code",
     "gemini-cli",
@@ -1126,6 +1127,117 @@
       "enabled": true,
       "factor": 2.0,
       "min_ai_min": 10
+    }
+  },
+  "ai_sessions": {
+    "paths": {
+      "opencode": [
+        "C:\\Users\\niangao/.local/share/opencode",
+        "C:\\Users\\niangao/.config/opencode"
+      ],
+      "chatgpt": [
+        "C:\\Users\\niangao\\AppData\\Roaming/ChatGPT",
+        "C:\\Users\\niangao\\AppData\\Local/ChatGPT",
+        "C:\\Users\\niangao/.chatgpt"
+      ],
+      "claude": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Claude",
+        "C:\\Users\\niangao\\AppData\\Local/Claude",
+        "C:\\Users\\niangao/.claude"
+      ],
+      "cursor": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Cursor",
+        "C:\\Users\\niangao\\AppData\\Local/Cursor",
+        "C:\\Users\\niangao/.cursor"
+      ],
+      "windsurf": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Windsurf",
+        "C:\\Users\\niangao\\AppData\\Local/Windsurf",
+        "C:\\Users\\niangao/.codeium/windsurf",
+        "C:\\Users\\niangao/.windsurf"
+      ],
+      "trae": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Trae",
+        "C:\\Users\\niangao\\AppData\\Local/Trae",
+        "C:\\Users\\niangao/.trae"
+      ],
+      "deepseek": [
+        "C:\\Users\\niangao\\AppData\\Roaming/DeepSeek",
+        "C:\\Users\\niangao\\AppData\\Local/DeepSeek",
+        "C:\\Users\\niangao/.deepseek"
+      ],
+      "pi_agent": [
+        "C:\\Users\\niangao/.pi/agent/sessions",
+        "C:\\Users\\niangao/.pi-agent",
+        "C:\\Users\\niangao/.local/share/pi-agent",
+        "C:\\Users\\niangao\\AppData\\Roaming/pi-agent",
+        "C:\\Users\\niangao\\AppData\\Local/pi-agent",
+        "C:\\Users\\niangao/.config/pi-agent"
+      ],
+      "dsh": [
+        "\\\\wsl.localhost\\dsh-ubuntu\\home\\niangao\\.dsh",
+        "%DSH_DATA%",
+        "%DSH_HOME%",
+        "C:\\Users\\niangao/.dsh",
+        "C:\\Users\\niangao\\AppData\\Local/dsh"
+      ],
+      "qwen": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Qwen",
+        "C:\\Users\\niangao\\AppData\\Local/Qwen",
+        "C:\\Users\\niangao/.qwen"
+      ],
+      "glm": [
+        "C:\\Users\\niangao\\AppData\\Roaming/zhipu",
+        "C:\\Users\\niangao\\AppData\\Local/GLM",
+        "C:\\Users\\niangao/.glm"
+      ],
+      "doubao": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Doubao",
+        "C:\\Users\\niangao\\AppData\\Local/Doubao",
+        "C:\\Users\\niangao/.doubao"
+      ],
+      "kimi": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Kimi",
+        "C:\\Users\\niangao\\AppData\\Local/Kimi",
+        "C:\\Users\\niangao/.kimi"
+      ],
+      "marscode": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Marscode",
+        "C:\\Users\\niangao\\AppData\\Local/Marscode",
+        "C:\\Users\\niangao/.marscode"
+      ],
+      "codebuddy": [
+        "C:\\Users\\niangao\\AppData\\Roaming/CodeBuddy",
+        "C:\\Users\\niangao\\AppData\\Local/CodeBuddy",
+        "C:\\Users\\niangao/.codebuddy"
+      ],
+      "minimax": [
+        "C:\\Users\\niangao\\AppData\\Roaming/MiniMax",
+        "C:\\Users\\niangao\\AppData\\Local/MiniMax",
+        "C:\\Users\\niangao/.minimax"
+      ],
+      "stepfun": [
+        "C:\\Users\\niangao\\AppData\\Roaming/StepFun",
+        "C:\\Users\\niangao\\AppData\\Local/StepFun",
+        "C:\\Users\\niangao/.step"
+      ],
+      "yi": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Yi",
+        "C:\\Users\\niangao\\AppData\\Local/Yi",
+        "C:\\Users\\niangao/.yi"
+      ],
+      "baichuan": [
+        "C:\\Users\\niangao\\AppData\\Roaming/Baichuan",
+        "C:\\Users\\niangao\\AppData\\Local/Baichuan",
+        "C:\\Users\\niangao/.baichuan"
+      ],
+      "zcode": [
+        "C:\\Users\\niangao/.zcode/cli",
+        "C:\\Users\\niangao/.zcode/v2/sessions"
+      ],
+      "codex": [
+        "C:\\Users\\niangao/.codex/sessions"
+      ]
     }
   }
 }

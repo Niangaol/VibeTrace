@@ -352,6 +352,7 @@ def test_no_match():
 def test_greedy_match():
     assert _match("gpt-4o-mini-2024-07-18") == "gpt-4o-mini"
     assert _match("claude-3-5-sonnet-20240620") == "claude-3-5-sonnet"
+    assert _match("gemini-2.5-pro-latest") == "gemini-2.5-pro"
 
 
 # ---------------------------------------------------------------------------
@@ -415,12 +416,3 @@ def test_gpt_54_variants():
     ]
     for text, expected in cases:
         assert _match(text) == expected, f"{text} -> {_match(text)} != {expected}"
-
-
-# ---------------------------------------------------------------------------
-# 19. 贪婪匹配（最长有效匹配）
-# ---------------------------------------------------------------------------
-def test_greedy_match():
-    assert _match("gpt-4o-mini-2024-07-18") == "gpt-4o-mini"
-    assert _match("claude-3-5-sonnet-20240620") == "claude-3-5-sonnet"
-    assert _match("gemini-2.5-pro-latest") == "gemini-2.5-pro"

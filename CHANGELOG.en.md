@@ -8,6 +8,39 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [2.9.3] - 2026-08-31
+
+> Theme: vibe coding metric corrections (three growth metrics revived + two fake-data insights) + new ZCode / Codex session deep-stats adapters + DSH zstd session support (backfill of previously uncommitted working-tree changes).
+
+### Added
+- **ZCode adapter (dual source)**: `ai_keywords`/`ai_tool_names` add zcode (process/title timing); session deep stats read `~/.zcode/cli/db/db.sqlite` (opencode-family schema: session/message/part, live WAL database opened read-only via `mode=ro`, real modelID) and `~/.zcode/v2/sessions/*.json` (meta+messages via the generic parser, ms epoch); `_paths_fingerprint` stats only db.sqlite(-wal) inside the cli dir so log/*.jsonl appends cannot thrash the collect cache
+- **Codex CLI adapter**: new `_parse_codex_file` dedicated parser for the rollout format (`~/.codex/sessions/**/*.jsonl`): session_meta→cwd/session id, turn_context→model context backfill, response_item(message)→user/assistant messages (developer skipped), and event_msg(token_count) `last_token_usage` per-request increments accumulated onto the most recent assistant message (real usage semantics; the cumulative `total_token_usage` must not be summed); UTC timestamps converted to local time before date matching; large files exempt from the 2MB parse-cache cap (same precedent as dsh)
+- **DSH zstd session support**: `_parse_dsh_file` parses `session.jsonl.zstd` (request/header provides model context, assistant real inputTokens/outputTokens normalized, user→assistant pairing for rounds); `_walk_dsh_files` only picks session files; `_dsh_may_contain` pre-checks createdAt to skip full decompression; `_SKIP_SCAN_DIRS` prunes node_modules and friends; zstandard stays optional (graceful empty fallback); PyInstaller spec collects the zstandard C extension via `collect_all`; `_message_usage` recognizes inputTokens/outputTokens with a totalTokens fallback
+
+### Fixed
+- **Growth metrics triple fix (closing out the v2.9.2 regression)**: `model_diversity_entropy` now reads `total.by_model` from `ai_sessions.collect` instead of the non-existent `agg.get("by_model")` key (report.aggregate never produced it — the v2.9.2 misattribution fix swapped in a dead source, making the metric always None); `prompt_efficiency` denominator switched from the non-existent `total.get("sessions")` to the conversations count (previously always 0); the phantom `project_focus_hhi` key written by the incremental merge is corrected to the frontend contract key `focus_hhi` (previously the metric froze after any incremental update); week snapshots gain an `ai_sessions` session-count field and the prompt_efficiency incremental merge is rewritten as total lines / total sessions (the old formula referenced a dead `ai_sessions` key)
+- **Fake learning insight**: removed the "substitute total active time when curr_ai==0" fallback in the `rule_insights` learning rule — previously "used AI yesterday, none today" reported a fake "AI usage grew N%" card
+- **Persona ai_ratio dead key**: persona_insights by_ai fallback now sums values() instead of reading the non-existent "总计" key (same bug class fixed in rule_insights in v2.9.2)
+- **deep_work cross-gap merging**: activitywatch_metrics coding blocks now break when the gap exceeds `insights.behavior.deep_work_max_gap_s` (default 300s) — previously blocks accumulated purely by sequence adjacency, merging a morning and an evening coding session into one "continuous" block; also removed the write-only block_start dead variable
+- **web_ai config tolerance**: `ai_sessions.web_ai` set to a boolean/scalar no longer raises AttributeError (dict keeps the enabled key semantics, other shapes act as the switch itself)
+
+### Tests (2.9.3)
+- New tests/unit/test_zcode_support.py (6 cases: SQLite parsing / collect full chain / v2 JSON generic parsing / default path registration / fingerprint WAL invalidation / log-noise pruning) and tests/unit/test_codex_parser.py (5 cases: parsing with developer skip / usage increment attribution / collect real tokens / UTC→local day boundary / bad-line skip)
+- Growth triple-metric assertions pinned on both weekly aggregate and incremental merge paths; four insights behavior pins (learning/persona/deep_work/web_ai)
+- Full regression 670 passed, 0 failed
+
+## [2.9.2] - 2026-08-26
+
+### Fixed
+- **Git deep analysis crash**: `analyze_repo_deep` used `c.get("ts")` but `_parse_numstat` produces `date` (ISO string), so ts was always None → `UnboundLocalError` on `ts_sorted`. With `insights.git.deep: true`, any repo with commits crashed. Fix: parse `date` via `fromisoformat().timestamp()`, initialize `ts_sorted = []`, add `import datetime`
+- **Learning insight dead code**: `rule_insights` learning rule read `(prev_agg.get("by_ai") or {}).get("total_active_ms")`, but `by_ai` is a flat `{tool: ms}` mapping → key never exists → prev_ai/curr_ai always 0 → rule never fires. Fix: use `sum(...values())`
+- **Growth metric misattribution**: `_aggregate_week` populated `model_diversity_entropy` with app switch entropy (activitywatch_metrics `switch_entropy`), not model diversity entropy. `_merge_incremental` had the same bug. Fix: both paths now compute Shannon entropy from `by_model` turns
+- **Compare view colspan mismatch**: loading state used `colspan="11"` while header has 12 columns and empty state was already 12. Fix: loading state also `colspan="12"`
+- **Dead variable in incremental merge**: `aggs` dict populated but never read in `_merge_incremental`. Fix: removed
+
+### Tests (2.9.2)
+- Full regression 643 passed, 0 failed
+
 ## [2.9.1] - 2026-08-26
 
 ### Added
@@ -22,18 +55,6 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 ### Tests (2.9.1)
 - 4 new unit test files, 137 new functions (model_regex/pricing_table/agent_paths/git_auto_discover)
-- Full regression 643 passed, 0 failed
-
-## [2.9.2] - 2026-08-26
-
-### Fixed
-- **Git deep analysis crash**: `analyze_repo_deep` used `c.get("ts")` but `_parse_numstat` produces `date` (ISO string), so ts was always None → `UnboundLocalError` on `ts_sorted`. With `insights.git.deep: true`, any repo with commits crashed. Fix: parse `date` via `fromisoformat().timestamp()`, initialize `ts_sorted = []`, add `import datetime`
-- **Learning insight dead code**: `rule_insights` learning rule read `(prev_agg.get("by_ai") or {}).get("total_active_ms")`, but `by_ai` is a flat `{tool: ms}` mapping → key never exists → prev_ai/curr_ai always 0 → rule never fires. Fix: use `sum(...values())`
-- **Growth metric misattribution**: `_aggregate_week` populated `model_diversity_entropy` with app switch entropy (activitywatch_metrics `switch_entropy`), not model diversity entropy. `_merge_incremental` had the same bug. Fix: both paths now compute Shannon entropy from `by_model` turns
-- **Compare view colspan mismatch**: loading state used `colspan="11"` while header has 12 columns and empty state was already 12. Fix: loading state also `colspan="12"`
-- **Dead variable in incremental merge**: `aggs` dict populated but never read in `_merge_incremental`. Fix: removed
-
-### Tests (2.9.2)
 - Full regression 643 passed, 0 failed
 
 ## [2.9.0] - 2026-08-25

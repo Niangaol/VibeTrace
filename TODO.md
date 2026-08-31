@@ -1,9 +1,9 @@
 # 交接文档 / 待办清单
 
-> 交接时间：2026-08-20 · 项目：VibeTrace（刻迹）（VibeTrace）
+> 交接时间：2026-08-31 · 项目：VibeTrace（刻迹）（VibeTrace）
 > 远程仓库：https://github.com/Niangaol/VibeTrace（master 分支）
-> 当前版本：v2.8.2（已发布，2026-08-23）
-> 当前提交：7d60620
+> 当前版本：v2.9.3（已发布，2026-08-31）
+> 当前提交：v2.9.3 release 提交（见 git log）
 
 ---
 
@@ -29,6 +29,10 @@
 | v2.5.3 | ⚠️ 无 tag/Release | 仅在 CHANGELOG 有记录，未打 tag（AI 价格设置可用 + 导出进度反馈） |
 | v2.7.0 | ✅ 已发布 | 行动与目标：告警闭环（alerts.py · 预算 warn/exceed + 连续工作休息提醒，托盘气泡）；每日目标与 streak（goals.py · 可选默认关闭，/api/goals + 概览进度面板 + 设置开关组）；全局性能优化（AI/浏览器历史指纹缓存、SQLite 提速、Token 真实用量优先与加权估算、learn.py 基线） |
 | v2.8.2 | ✅ 已发布 | 小版本修复：五处模块级缓存补线程锁（dashboard 并发请求下 LRU 竞态）；报表链透传 config_path（--data-root 下日报配置不生效，优先级与 dashboard 统一）；守护循环暂停分支补退出检查（暂停后退出不再挂死）；新增并发锤/配置流/暂停退出三类回归钉扎 |
+| v2.9.0 | ✅ 已发布 | 仪表盘全面视觉升级：设计令牌系统化（radius/space/shadow/ease/transition）、亮暗双主题精修、11 类克制动效（reduced-motion 降级）；模型价格按 6 厂商分组折叠；应用品牌图标；批次二修复（目录枚举确定性化并提上限至 4096、周/月报 config_path 贯通并激活 CLI --config） |
+| v2.9.1 | ✅ 已发布 | 成长/对比指标扩展（model_diversity_entropy/tool_switch_freq/focus_hhi/learning_curve/efficiency_stability/adoption_proxy/prompt_efficiency 七类）；Git 深度分析（auto_discover 递归≤3 + author_detail/commit_rhythm/language_dist/deep_work）；模型正则 60+/agent 路径 29/定价 90 条；ActivityWatch 参考指标与 6 类新洞察；DSH Desktop 适配与前端厂商归类；timeline/growth/compare 加载态 |
+| v2.9.2 | ✅ 已发布 | 修复批次：Git 深度分析崩溃（date/ts 字段误用 → UnboundLocalError）；学习曲线洞察死代码（by_ai 键不存在致规则永不触发）；成长指标 model_diversity_entropy 误塞 app 切换熵（含增量路径）；对比视图加载态 colspan 不一致；增量合并死变量 |
+| v2.9.3 | ✅ 已发布 | vibe coding 指标修正（growth 模型多样熵/提示效率/HHI 键名三连修复 + 学习曲线假洞察/persona 死键/deep_work 间隔上限/web_ai 配置容错）；新增 ZCode（db.sqlite + v2/sessions 双源）与 Codex CLI（rollout 专用解析）会话深度适配；DSH zstd 会话支持（含 PyInstaller zstandard 打包） |
 | v2.8.1 | ✅ 已发布 | 小版本收口（无新特性）：多日 AI 成本查询 121s→0.95s（指纹确定性/缓存容量/解析记忆化/查询级批作用域）；/api/budget 边界年 500 兑现 200 空态契约；测试体系合二为一（test_all.py 47 函数并入 pytest 并退役，全链路 E2E 七阶段，覆盖率实测 79%） |
 | v2.8.0 | ✅ 已发布 | 工程收尾与测试补位：dashboard 纯函数外置 dashboard_util.py（1917→1714 行）、frontend smoke（4 项）+ e2e 冒烟（2 项）、覆盖率门禁 65→70；Git 侧采纳率代理指标（/api/adoption · 免责+折叠展示，confidence 永不 high）；受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势） |
 
@@ -113,7 +117,7 @@
 - **Python**：默认 `python`=3.14；带 PyInstaller 的 3.11 在
   `C:\Users\niangao\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe`
 - **构建**：`python -m PyInstaller VibeTrace.spec --noconfirm`（先停守护任务，exe 会被占用）
-- **测试**：`python -m pytest tests/ -q`（约499项全过；test_all.py 已并入退役）；`ruff check .`（0 违规）；`coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q && coverage report --fail-under=70`（实测 80%）；详见 `docs/TEST_WORKFLOW.md`
+- **测试**：`python -m pytest tests/ -q`（约670项全过；test_all.py 已并入退役）；`ruff check .`（0 违规）；`coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q && coverage report --fail-under=70`（实测 80%）；详见 `docs/TEST_WORKFLOW.md`
   - 若 Windows 临时目录权限导致测试失败，可先清理 `%TEMP%\usagemon_hist_*` / `dsh-*`
 - **发布**：`git tag vX.Y.Z && git push origin vX.Y.Z` → CI 自动测试→构建→冒烟→Release
 - **守护**：计划任务 `VibeTrace`（exe）/`VibeTraceReport`（每日 19:30 日报）

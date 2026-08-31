@@ -2,17 +2,23 @@
 # VibeTrace.spec — PyInstaller 打包配置（monitor.py 多工具入口，原名 UsageMonitor.spec）
 # 构建：python -m PyInstaller VibeTrace.spec --noconfirm
 
+from PyInstaller.utils.hooks import collect_all
+
+# zstandard（C 扩展）：DSH 会话解压用，collect_all 收集其 .pyd/动态库与子模块
+_zstd_binaries, _zstd_datas, _zstd_hidden = collect_all('zstandard')
+
 a = Analysis(
     ['monitor.py'],
     pathex=[],
-    binaries=[],
+    binaries=_zstd_binaries,
     datas=[
         ('assets/icon.ico', 'assets'),
         ('assets/tray.ico', 'assets'),
         ('assets/dashboard.html', 'assets'),
-    ],
+    ] + _zstd_datas,
     hiddenimports=['insights', 'updater', 'sqlite_store', 'ai_sessions',
-                   'timeline', 'budget', 'tool_compare', 'growth', 'query', 'adoption'],
+                   'timeline', 'budget', 'tool_compare', 'growth', 'query', 'adoption',
+                   'zstandard'] + _zstd_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

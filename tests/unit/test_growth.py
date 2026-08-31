@@ -40,7 +40,8 @@ def _patch_sources(monkeypatch, env: dict):
         env["counts"]["agg"] += 1
         agg = {"by_category": dict(env["by_category"].get(day, {})),
                "total_active_ms": int(env["ms"].get(day, 0)),
-               "sessions": [{"app": "x", "duration_ms": 1000}] if env["ms"].get(day) else []}
+               "sessions": [{"app": "x", "duration_ms": 1000, "project": "projA"}
+                            ] if env["ms"].get(day) else []}
         agg["_day"] = day
         return agg
 
@@ -55,6 +56,8 @@ def _patch_sources(monkeypatch, env: dict):
         q = env["quality"].get(day, {})
         return {"date": day, "enabled": True, "found": True, "tools": {}, "web_ai": {},
                 "total": {"generated_lines": int(env["generated"].get(day, 0)),
+                          "by_model": dict(env["by_model"].get(day, {})),
+                          "conversations": [{"turns": 1}] * int(env["convs"].get(day, 0)),
                           "quality_summary": {"sessions_scored": int(q.get("n", 0)),
                                               "avg": int(q.get("avg", 0))}}}
 
@@ -85,6 +88,8 @@ def _env():
         "saved": {},         # day -> saved_ms
         "quality": {},       # day -> {"n": scored, "avg": int}
         "generated": {},     # day -> generated_lines
+        "by_model": {},      # day -> {model: {"turns": n}}（collect 侧，喂模型多样熵）
+        "convs": {},         # day -> 会话数（conversations 条数，喂 prompt_efficiency 分母）
         "git": {},           # day -> {"lines_added", "churn", "modify_ratio"} | None
     }
 
@@ -231,6 +236,8 @@ class TestAggregateWeek:
             env["saved"][d] = 15 * 60 * 1000  # 15 分钟
             env["quality"][d] = {"n": 2 + i, "avg": 65 + i}  # 65/66/67/68
             env["generated"][d] = 100 + i * 100  # 100/200/300/400
+            env["by_model"][d] = {"claude-x": {"turns": 3}, "glm-y": {"turns": 1}}
+            env["convs"][d] = 2 + i  # 2/3/4/5
             env["git"][d] = {"lines_added": 10 + i, "churn": 20, "modify_ratio": 0.2}
         _patch_sources(monkeypatch, env)
         root = str(tmp_path / "w1")
@@ -246,6 +253,11 @@ class TestAggregateWeek:
         assert wk["modify_ratio"] == pytest.approx(0.2)     # 每天都 git found
         assert wk["ai_minutes"] == pytest.approx(120.0)     # 30*4
         assert wk["saved_minutes"] == 60                    # 15*4
+        # v2.9.3 钉扎：v2.9.1 三指标的数据源/分母/键名（修复前恒 None/0/幽灵键）
+        assert wk["ai_sessions"] == 14                      # 2+3+4+5（conversations 条数）
+        assert wk["prompt_efficiency"] == pytest.approx(71.4)  # 1000/14
+        assert wk["model_diversity_entropy"] == pytest.approx(0.811, abs=1e-3)  # shannon([3,1]) 日均
+        assert wk["focus_hhi"] == pytest.approx(1.0)        # 单项目 HHI=1（键名即 focus_hhi）
 
     def test_scored_days_filter_zeros(self, tmp_path, monkeypatch):
         """无会话天（sessions_scored=0、avg=0）不得混入 quality_avg 分母。"""
@@ -400,6 +412,10 @@ class TestGrowthSnapshot:
         for d in w1 + w2:
             env["focus"][d] = 50
             env["quality"][d] = {"n": 1, "avg": 50}
+            env["ms"][d] = 60 * 60 * 1000  # 有会话 → project HHI 可算
+            env["generated"][d] = 100
+            env["convs"][d] = 2
+            env["by_model"][d] = {"m1": {"turns": 2}}
         _patch_sources(monkeypatch, env)
         growth.growth_snapshot(root, _cfg())
         # 第二周新增一天
@@ -407,12 +423,20 @@ class TestGrowthSnapshot:
         _mk_dirs(root, [extra])
         env["focus"][extra] = 80
         env["quality"][extra] = {"n": 1, "avg": 60}
+        env["ms"][extra] = 60 * 60 * 1000
+        env["generated"][extra] = 300
+        env["convs"][extra] = 1
         env["counts"] = {"agg": 0, "collect": 0, "git": 0}
         result = growth.growth_snapshot(root, _cfg())
         assert result["source"] == "fresh"  # 有变化 → 重写
         w2_entry = [w for w in result["weeks"] if w["week"] == "2099-W31"][0]
         assert w2_entry["days"] == 4
         assert env["counts"]["agg"] == 1  # 只重算变化的那一天所在周（完成周复用）
+        # v2.9.3 钉扎：增量合并键名/分母（曾写 project_focus_hhi 幽灵键 + ai_sessions 死键）
+        assert "project_focus_hhi" not in w2_entry
+        assert w2_entry["focus_hhi"] == pytest.approx(1.0)  # 单项目 HHI=1，键名修正后随增量更新
+        assert w2_entry["ai_sessions"] == 7                 # 旧周 3 天×2 + 新增 1
+        assert w2_entry["prompt_efficiency"] == pytest.approx(85.7)  # (300+300)/7
 
     def test_empty_data_empty_state(self, tmp_path, monkeypatch):
         """无任何日期目录 → 200 空态 weeks=[] trend=[]；快照写入空档，再次调用不再重算。"""

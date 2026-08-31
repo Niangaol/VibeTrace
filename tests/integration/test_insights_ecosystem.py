@@ -749,11 +749,31 @@ def test_ai_sessions_more_tools():
                 }
             }
         }, fh, ensure_ascii=False)
-    with open(os.path.join(dsh_dir, "sessions.jsonl"), "w", encoding="utf-8") as fh:
-        fh.write(json.dumps({"timestamp": f"{day}T13:00:00", "role": "user", "content": "dsh q"},
-                            ensure_ascii=False) + "\n")
-        fh.write(json.dumps({"timestamp": f"{day}T13:01:00", "role": "assistant", "content": "dsh a"},
-                            ensure_ascii=False) + "\n")
+    # DSH 会话为 zstd 压缩的 JSONL（session.jsonl.zstd），解析走 _parse_dsh_file；
+    # time 字段为 ms epoch，需匹配测试日 day，否则被 _collect_local 日期过滤掉。
+    if ai_sessions._HAS_ZSTD:
+        import datetime as _dt
+        import zstandard
+        dsh_path = os.path.join(dsh_dir, "session.jsonl.zstd")
+        t0 = int(_dt.datetime.fromisoformat(f"{day}T13:00:00").timestamp() * 1000)
+        t1 = int(_dt.datetime.fromisoformat(f"{day}T13:01:00").timestamp() * 1000)
+        with zstandard.open(dsh_path, "wt", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "session", "version": 0, "id": "dsh-s1",
+                                 "createdAt": t0, "cwd": "/proj"}, ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"type": "user/message", "seq": 1, "time": t0,
+                                 "data": {"role": "user",
+                                          "content": [{"type": "text", "text": "dsh q"}]}},
+                                ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"type": "assistant/message", "seq": 2, "time": t1,
+                                 "data": {"message": {"role": "assistant",
+                                                      "content": [{"type": "text", "text": "dsh a"}]}}},
+                                ensure_ascii=False) + "\n")
+    else:
+        with open(os.path.join(dsh_dir, "session.jsonl.zstd"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"timestamp": f"{day}T13:00:00", "role": "user", "content": "dsh q"},
+                                ensure_ascii=False) + "\n")
+            fh.write(json.dumps({"timestamp": f"{day}T13:01:00", "role": "assistant", "content": "dsh a"},
+                                ensure_ascii=False) + "\n")
 
     cfg = {
         "ai_sessions": {

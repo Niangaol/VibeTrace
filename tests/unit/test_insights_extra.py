@@ -98,3 +98,54 @@ def test_persona_label():
     p = insights.persona_insights(agg, cfg)
     assert "label" in p
     print("  [PASS] persona_label")
+
+
+def test_rule_learning_no_fake_growth_when_ai_zero():
+    """昨日有 AI、今日无 AI：不得用总活跃时长顶替而报“增长”假卡（v2.9.3 修复）。"""
+    cfg = {"insights": {"enabled": True, "rules": {"learning_curve_min_growth": 0.05}}}
+    prev = {"by_ai": {"opencode": 600000}}                  # 昨日 AI 10 分钟
+    agg = _base_agg(by_ai={}, total_active_ms=8 * 3600000)  # 今日无 AI、活跃 8h
+    out = insights.rule_insights(agg, cfg, prev_agg=prev)
+    assert not any(o["type"] == "learning" for o in out)
+    print("  [PASS] rule_learning_no_fake_growth_when_ai_zero")
+
+
+def test_rule_learning_positive_growth_still_fires():
+    """双方都有 AI 时长且正增长 ≥ 门槛：learning 卡照常触发（修复不误伤正常路径）。"""
+    cfg = {"insights": {"enabled": True, "rules": {"learning_curve_min_growth": 0.05}}}
+    prev = {"by_ai": {"opencode": 600000}}
+    agg = _base_agg(by_ai={"opencode": 1200000})
+    out = insights.rule_insights(agg, cfg, prev_agg=prev)
+    assert any(o["type"] == "learning" for o in out)
+    print("  [PASS] rule_learning_positive_growth_still_fires")
+
+
+def test_persona_ai_ratio_from_by_ai_sum():
+    """by_category 无 AI编程 键时 ai_ratio 回退为 by_ai 求和（曾读死键“总计”恒 0）。"""
+    cfg = {"insights": {"enabled": True, "persona": {"enabled": True}}}
+    agg = _base_agg(by_category={"办公学习": 3600000}, by_ai={"opencode": 3600000})
+    p = insights.persona_insights(agg, cfg)
+    assert p["dimensions"]["ai_ratio"] == 0.25  # 1h / 4h
+    print("  [PASS] persona_ai_ratio_from_by_ai_sum")
+
+
+def test_activitywatch_deep_work_gap_split():
+    """两段编码会话间隔超 deep_work_max_gap_s → 分块；各块不足 15 分钟不计入。"""
+    cfg = {"insights": {"enabled": True, "behavior": {"deep_work_max_gap_s": 300}}}
+    far = [
+        {"start": "2026-08-08T09:00:00", "end": "2026-08-08T09:10:00",
+         "duration_ms": 10 * 60000, "app": "VS Code", "category": "开发"},
+        {"start": "2026-08-08T17:00:00", "end": "2026-08-08T17:10:00",
+         "duration_ms": 10 * 60000, "app": "VS Code", "category": "开发"},
+    ]
+    m = insights.activitywatch_metrics({"by_category": {"开发": 20 * 60000}, "sessions": far}, cfg)
+    assert m["deep_work_min"] == 0.0  # 跨 8 小时被分块，各 10 分钟不足门槛
+    near = [
+        {"start": "2026-08-08T09:00:00", "end": "2026-08-08T09:10:00",
+         "duration_ms": 10 * 60000, "app": "VS Code", "category": "开发"},
+        {"start": "2026-08-08T09:12:00", "end": "2026-08-08T09:25:00",
+         "duration_ms": 13 * 60000, "app": "VS Code", "category": "开发"},
+    ]
+    m2 = insights.activitywatch_metrics({"by_category": {"开发": 20 * 60000}, "sessions": near}, cfg)
+    assert m2["deep_work_min"] == 23.0  # 间隔 2 分钟 ≤ 上限 → 合并一块 10+13
+    print("  [PASS] activitywatch_deep_work_gap_split")

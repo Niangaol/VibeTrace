@@ -161,3 +161,19 @@ def test_parse_file_bad_and_jsonl(tmp_path):
     out = ai_sessions.parse_file(str(jl))
     assert len(out) >= 1
     print("  [PASS] parse_file_variants")
+
+
+def test_collect_web_ai_scalar_tolerated(tmp_path):
+    """ai_sessions.web_ai 配成布尔/标量不得崩溃（此前非 dict 会 AttributeError）。"""
+    paths = {"t": [str(tmp_path / "nope")]}  # 不存在的目录：不扫真实会话路径
+    visits = [{"domain": "chatgpt.com", "url": "https://chatgpt.com/c/abcdef123456",
+               "time": "2026-01-01T10:00:00", "title": "t"}]
+    r_off = ai_sessions.collect("2026-01-01",
+                                {"ai_sessions": {"enabled": True, "web_ai": False, "paths": paths}},
+                                web_visits=visits)
+    assert r_off["web_ai"]["found"] is False  # false → 视为关闭
+    r_on = ai_sessions.collect("2026-01-01",
+                               {"ai_sessions": {"enabled": True, "web_ai": True, "paths": paths}},
+                               web_visits=visits)
+    assert r_on["web_ai"]["found"] is True    # true → 视为开启
+    print("  [PASS] collect_web_ai_scalar_tolerated")

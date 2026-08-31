@@ -590,9 +590,8 @@ def rule_insights(agg: dict, config: dict, prev_agg: dict | None = None) -> list
     if isinstance(prev_agg, dict):
         prev_ai = int(sum((prev_agg.get("by_ai") or {}).values()) or 0)
         curr_ai = int(sum((by_ai or {}).values()) or 0)
-        # fallback: 用 total 近似
-        if curr_ai == 0:
-            curr_ai = total
+        # 无兜底：curr_ai==0 时增长率必为负、下方正增长门槛自然不触发。
+        # （v2.9.3 前曾用 total 活跃时长顶替，"昨日有用 AI、今日没用"反报增长假卡）
         if prev_ai > 0 and curr_ai > 0:
             growth = (curr_ai - prev_ai) / prev_ai
             min_growth = max(0.0, float(rules.get("learning_curve_min_growth", 0.05) or 0.05))
@@ -842,22 +841,33 @@ def activitywatch_metrics(agg: dict, config: dict | None = None) -> dict:
         app_counts[a] = app_counts.get(a, 0) + 1
     switch_entropy = _shannon_entropy(list(app_counts.values()))
 
-    # deep_work：连续 ≥15 分钟的编码/AI 会话块
+    # deep_work：编码/AI 会话累计 ≥15 分钟记一块；相邻两段编码会话的间隔超过
+    # behavior.deep_work_max_gap_s（默认 300s）视为中断、结算当前块——否则上午/傍晚
+    # 两段会因"序列相邻"被串成同一个"连续"块（中间无会话记录时尤其明显）。
+    bh = _insights_config(config or {})["behavior"]
+    try:
+        max_gap_s = max(0.0, float(bh.get("deep_work_max_gap_s", 300) or 300))
+    except (TypeError, ValueError):
+        max_gap_s = 300.0
     deep_work_min = 0.0
-    block_start = None
     block_dur = 0.0
+    prev_coding = None
     for s in ordered:
         cat = s.get("category") or ""
         dur_min = int(s.get("duration_ms") or 0) / 60000.0
         is_coding = any(t in str(cat) for t in ("AI编程", "开发", "编码", "编程"))
         if is_coding:
-            if block_start is None:
-                block_start = s.get("start")
+            if block_dur > 0 and prev_coding is not None:
+                gap = _gap_seconds(prev_coding, s)
+                if gap is not None and gap > max_gap_s:
+                    if block_dur >= 15:
+                        deep_work_min += block_dur
+                    block_dur = 0.0
             block_dur += dur_min
+            prev_coding = s
         else:
             if block_dur >= 15:
                 deep_work_min += block_dur
-            block_start = None
             block_dur = 0.0
     if block_dur >= 15:
         deep_work_min += block_dur
@@ -1041,7 +1051,9 @@ def persona_insights(agg: dict, config: dict | None = None) -> dict:
 
     coding_kw = tuple(ins["persona"].get("coding_categories") or _DEFAULT_PERSONA["coding_categories"])
     coding_ms = sum(int(v or 0) for k, v in by_category.items() if _is_coding_category(k, coding_kw))
-    ai_ms = int(by_category.get("AI编程", 0) or 0) or int(by_ai.get("总计", 0) or 0)
+    # by_ai 是 {tool: ms} 扁平映射（无"总计"键），fallback 按 sum 求和
+    # （v2.9.2 在 rule_insights 修过同类死键，此处补齐）
+    ai_ms = int(by_category.get("AI编程", 0) or 0) or int(sum(int(v or 0) for v in by_ai.values()))
     study_ms = int(by_category.get("办公学习", 0) or 0) + int(by_browser.get("学习", 0) or 0)
     social_ms = int(by_category.get("社交聊天", 0) or 0)
     game_ms = int(by_category.get("游戏", 0) or 0)

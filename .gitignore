@@ -49,3 +49,20 @@ logs/
 
 # 本地无头浏览器 CDP 验证 profile（headless Edge 临时数据目录）
 /.edge_cdp*/
+
+# ===== 本地敏感/自动化残留（勿提交）=====
+# GitHub 自动化 token 明文文件与设置脚本（含 GH_TOKEN，仅本地使用）
+.github-env
+setup_gh_token.ps1
+# 本地 CDP 前端验证脚本
+.cdp_*.mjs
+# learn.py 运行期个性化基线（<data_root>/baselines.json，性质同 aliases.json / growth_baseline.json）
+baselines.json
+# 带时间戳的配置备份（上面的 *.bak 只匹配纯 .bak 后缀）
+*.bak-*
+# 误把绝对路径当相对路径写入产生的目录（如 C:\tmp\...）
+/C:/
+
+# 本地 AI CLI 工具在仓库内的工作产物（会话计划/插件状态），不入库
+.zcode/
+.video_agent/

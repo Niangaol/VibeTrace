@@ -108,9 +108,11 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
       {week, days, scored_days, focus_score(均值), quality_avg(仅 scored_days>0 的天),
        generated_lines(总和), lines_added(总和), modify_ratio(有 git 数据天的均值|None),
        ai_minutes(总和分钟), saved_minutes(总和分钟),
-       model_diversity_entropy(日均), tool_switch_freq(日均), project_focus_hhi(日均),
+       model_diversity_entropy(日均，ai_sessions.collect 的 by_model 轮次 Shannon 熵),
+       tool_switch_freq(日均), focus_hhi(日均项目集中度),
        learning_curve(周内斜率), efficiency_stability(focus_score 标准差),
-       adoption_proxy(日均), prompt_efficiency(总生成行/总会话数)}
+       adoption_proxy(日均), prompt_efficiency(总生成行/总会话数),
+       ai_sessions(总会话数，prompt_efficiency 分母，增量合并键)}
     注意：quality_summary.avg=0 的天不得混入均值分母（scored_days 过滤）；
     modify_ratio 仅统计 git 有产出（found 且 churn>0）的天，无则 None；
     周 key = days[0] 的 ISO 周。纯函数：三源全部 monkeypatch 可测。
@@ -141,7 +143,9 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
             quality_vals.append(float(qs.get("avg") or 0))
             scored_days += 1
         generated_lines += int(total.get("generated_lines") or 0)
-        ai_sessions_count += int(total.get("sessions") or 0)
+        # 会话数口径：collect 的 total 无 "sessions" 键，取 conversations 条数
+        # （collect 每日按 turns 截断 top20，会话极多的日子会略低估——仅作提示效率分母）
+        ai_sessions_count += len(total.get("conversations") or [])
         git_result = git_insights.git_insights(config, day)
         git_total = git_result.get("total") or {}
         lines_added += int(git_total.get("lines_added") or 0)
@@ -151,8 +155,9 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         ai_minutes += int(by_cat.get("AI编程", 0) or 0) / 60000.0
         saved_ms += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
         ai_by_day.append(int(by_cat.get("AI编程", 0) or 0) / 60000.0)
-        # v2.9.1 新指标
-        by_model = agg.get("by_model") if isinstance(agg.get("by_model"), dict) else {}
+        # v2.9.1 新指标：数据源是 ai_sessions.collect 的 total.by_model
+        # （report.aggregate 不产出 by_model——v2.9.2 曾误读 agg 侧导致恒 None）
+        by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
         if by_model:
             model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
             entropy_vals.append(insights._shannon_entropy(model_counts))
@@ -219,6 +224,7 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         "efficiency_stability": efficiency_stability,
         "adoption_proxy": round(sum(adoption_vals) / len(adoption_vals), 3) if adoption_vals else None,
         "prompt_efficiency": prompt_efficiency,
+        "ai_sessions": ai_sessions_count,  # 总会话数（prompt_efficiency 分母；增量合并键）
     }
 
 
@@ -332,8 +338,8 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
     """增量合并：只聚合 delta_days 的三源数据并与 old 周均值合并。
 
     仅为满足 `test_new_day_triggers_incremental_update` 对“只重算新增天”（counts==len(delta)）的预期；
-    合并公式与 _aggregate_week 保持一致（均值/总和口径），因测试仅校验 days/source/counts，
-    其它字段的微小舍入误差不影响通过。"""
+    合并公式与 _aggregate_week 保持一致（均值/总和口径）。v2.9.3 起测试同时校验
+    focus_hhi/ai_sessions/prompt_efficiency 的合并值（键名与分母曾错，详见 CHANGELOG）。"""
     try:
         old_days = int(old.get("days") or len(old.get(_D_DAY) or []))
     except Exception:
@@ -362,7 +368,8 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
             quality_delta.append(float(qs.get("avg") or 0))
             scored_delta += 1
         generated_delta += int(total.get("generated_lines") or 0)
-        ai_sessions_delta += int(total.get("sessions") or 0)
+        # 与 _aggregate_week 同口径：conversations 条数（collect 每日截断 top20）
+        ai_sessions_delta += len(total.get("conversations") or [])
         git_result = git_insights.git_insights(config, day)
         git_total = git_result.get("total") or {}
         lines_added_delta += int(git_total.get("lines_added") or 0)
@@ -371,8 +378,8 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
         ai_minutes_delta += int(by_cat.get("AI编程", 0) or 0) / 60000.0
         saved_ms_delta += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
-        # v2.9.1 新指标：模型多样熵改用 by_model 轮次 Shannon 熵（与 _aggregate_week 一致）
-        by_model = agg.get("by_model") if isinstance(agg.get("by_model"), dict) else {}
+        # v2.9.1 新指标：模型多样熵取 ai_sessions.collect 的 total.by_model（与 _aggregate_week 一致）
+        by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
         if by_model:
             model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
             entropy_delta.append(insights._shannon_entropy(model_counts))
@@ -428,7 +435,15 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
     new_switch = round((float(old.get("tool_switch_freq") or 0) * old_days + sum(switch_delta)) / new_days, 1) if switch_delta else old.get("tool_switch_freq")
     new_hhi = round((float(old.get("focus_hhi") or 0) * old_days + sum(hhi_delta)) / new_days, 4) if hhi_delta else old.get("focus_hhi")
     new_adoption = round((float(old.get("adoption_proxy") or 0) * old_days + sum(adoption_delta)) / new_days, 3) if adoption_delta else old.get("adoption_proxy")
-    new_prompt_eff = round((int(old.get("prompt_efficiency") or 0) * old.get("days", 1) + generated_delta) / max(1, int(old.get("ai_sessions") or 0) + ai_sessions_delta), 1) if (generated_delta or int(old.get("ai_sessions") or 0)) else old.get("prompt_efficiency")
+    # prompt_efficiency = 总生成行 / 总会话数（与 _aggregate_week 同口径）。
+    # 旧快照无 ai_sessions 计数（v2.9.3 前该键是死键恒 0）→ 退化为仅 delta 口径自愈。
+    old_sessions_n = int(old.get("ai_sessions") or 0)
+    new_sessions_n = old_sessions_n + ai_sessions_delta
+    if new_sessions_n > 0:
+        new_prompt_eff = round(
+            (int(old.get("generated_lines") or 0) + generated_delta) / new_sessions_n, 1)
+    else:
+        new_prompt_eff = old.get("prompt_efficiency")
     merged = dict(old)
     merged.update({
         "days": new_days,
@@ -442,9 +457,10 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         "saved_minutes": new_saved,
         "model_diversity_entropy": new_entropy,
         "tool_switch_freq": new_switch,
-        "project_focus_hhi": new_hhi,
+        "focus_hhi": new_hhi,
         "adoption_proxy": new_adoption,
         "prompt_efficiency": new_prompt_eff,
+        "ai_sessions": new_sessions_n,
         # learning_curve 和 efficiency_stability 为跨周指标，增量合并暂不计算，保留旧值
     })
     # week 保持不变

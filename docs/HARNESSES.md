@@ -28,8 +28,9 @@ VibeTrace 对一个 AI 工具的"监控"分三个独立维度，一个工具可�
 | DeepSeek | ✅ | ✅ (`%APPDATA%/DeepSeek`) | ✅ chat.deepseek.com | |
 | Pi Agent（π） | ✅（含标题 "π" 特判，排除 python/pip 误伤） | ✅（专用解析器，`~/.pi/agent/sessions` 等） | — | |
 | DSH | ✅ | ✅（`%DSH_DATA%`/`%DSH_HOME%`/`~/.dsh`） | — | |
+| ZCode | ✅ | ✅（`~/.zcode/cli/db/db.sqlite` + `~/.zcode/v2/sessions`） | — | B：SQLite 与 opencode 同源 schema（活跃 WAL 只读）；v2 JSON 走通用解析，无 model 字段按"未识别"口径 |
 | Gemini CLI / Gemini | ✅ | ❌（本地会话格式未适配） | ✅ gemini.google.com | |
-| Codex CLI | ✅ | ❌ | — | |
+| Codex CLI | ✅ | ✅（专用解析器，`~/.codex/sessions`） | — | token 取 token_count 单次增量求和（真实口径，归因近似见 ai_sessions.\_parse_codex_file） |
 | Goose | ✅ | ❌ | — | |
 | Amazon Q | ✅ | ❌ | — | |
 | Aider | ✅ | ❌ | — | |

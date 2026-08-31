@@ -42,8 +42,19 @@ import threading
 
 from collections import OrderedDict
 
+# zstandard（可选）：DSH 会话以 .jsonl.zstd 存储，需解压读取。
+# 未安装时 DSH 数据优雅降级为空（不影响其他工具与仪表盘）。
+try:
+    import zstandard  # noqa: PLC0415
+    _HAS_ZSTD = True
+except Exception:  # noqa: BLE001 —— 缺库不阻断整个模块
+    zstandard = None
+    _HAS_ZSTD = False
+
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _MAX_FILE_SIZE = 20 * 1024 * 1024  # 单文件最大 20MB，避免误扫大文件卡顿
+# 目录枚举时跳过的重型/无关子目录（防 node_modules 等把 walk/指纹拖慢）
+_SKIP_SCAN_DIRS = {"node_modules", "__pycache__", ".git", "cache", "plugins"}
 
 # 常见本地会话目录（ai_sessions.paths 未配置时使用）
 _DEFAULT_PATHS: dict[str, list[str]] = {
@@ -145,6 +156,14 @@ _DEFAULT_PATHS: dict[str, list[str]] = {
         "%APPDATA%/Baichuan",
         "%LOCALAPPDATA%/Baichuan",
         "~/.baichuan",
+    ],
+    "zcode": [
+        # cli 目录只认 db/db.sqlite（活跃 WAL，mode=ro）；v2/sessions 走通用 JSON 解析
+        "~/.zcode/cli",
+        "~/.zcode/v2/sessions",
+    ],
+    "codex": [
+        "~/.codex/sessions",
     ],
 }
 
@@ -399,7 +418,8 @@ def _walk_files(dirs: list[str], max_files: int | None = None) -> list[str]:
         if not os.path.isdir(base):
             continue
         for root, sub_dirs, files in os.walk(base):
-            sub_dirs[:] = sorted(sub_dirs)  # 每层目录排序：固定递归顺序（topdown 原地生效）
+            # 每层目录排序 + 剪枝重型/无关子目录（topdown 原地生效）
+            sub_dirs[:] = sorted(d for d in sub_dirs if d not in _SKIP_SCAN_DIRS)
             for name in sorted(files):      # 每层文件排序：消除文件系统返回序差异
                 if len(out) >= max_files:
                     # 截断信号：本次统计为截断子集（数字偏小），记一次供观测
@@ -605,8 +625,10 @@ def _message_usage(msg: dict) -> tuple[int, int] | None:
 
     候选位置：
     - msg["usage"] = {input_tokens/output_tokens | prompt_tokens/completion_tokens}
+    - pi 风格：usage = {input/output/totalTokens}
+    - dsh 风格：usage = {inputTokens/outputTokens}
     - msg 顶层平铺：input_tokens / output_tokens / prompt_tokens /
-      completion_tokens / tokens_in / tokens_out
+      completion_tokens / tokens_in / tokens_out / input / output
     任一输入或输出侧有效（非负 int）即返回 (in, out)；缺失侧记 0；
     完全不存在返回 None（调用方回退内容估算）。
     """
@@ -616,12 +638,18 @@ def _message_usage(msg: dict) -> tuple[int, int] | None:
         return int(v) if v >= 0 else None
 
     usage = msg.get("usage") if isinstance(msg.get("usage"), dict) else {}
-    in_vals = [usage.get(k) for k in ("input_tokens", "prompt_tokens")] + \
-              [msg.get(k) for k in ("input_tokens", "prompt_tokens", "tokens_in")]
-    out_vals = [usage.get(k) for k in ("output_tokens", "completion_tokens")] + \
-               [msg.get(k) for k in ("output_tokens", "completion_tokens", "tokens_out")]
+    in_vals = [usage.get(k) for k in ("input_tokens", "prompt_tokens", "input", "inputTokens")] + \
+              [msg.get(k) for k in ("input_tokens", "prompt_tokens", "tokens_in", "input", "inputTokens")]
+    out_vals = [usage.get(k) for k in ("output_tokens", "completion_tokens", "output", "outputTokens")] + \
+               [msg.get(k) for k in ("output_tokens", "completion_tokens", "tokens_out", "output", "outputTokens")]
     n_in = next((_num(v) for v in in_vals if _num(v) is not None), None)
     n_out = next((_num(v) for v in out_vals if _num(v) is not None), None)
+    # totalTokens 仅在 in/out 全缺时兜底（输入侧=totalTokens，输出侧=0）
+    if n_in is None and n_out is None:
+        tt = usage.get("totalTokens")
+        n_tt = _num(tt)
+        if n_tt is not None:
+            return (n_tt, 0)
     if n_in is None and n_out is None:
         return None
     return (n_in or 0, n_out or 0)
@@ -1117,26 +1145,36 @@ def _parse_pi_file(path: str) -> list[dict]:
                             elif isinstance(p, str):
                                 parts.append(p)
                         text = "\n".join(parts)
+                    # 每消息自带 model/provider（优先），缺失时回退 model_change 上下文
+                    msg_model = inner.get("model")
+                    if isinstance(msg_model, str) and msg_model.strip():
+                        msg_model = _norm_pi_model(inner.get("provider", ""), msg_model)
+                    else:
+                        msg_model = cur_model
+                    usage = inner.get("usage")
                     out.append({
                         "role": role, "content": text,
                         "timestamp": obj.get("timestamp") or inner.get("timestamp"),
-                        "model": cur_model, "project": project, "conv_id": conv_id,
+                        "model": msg_model, "project": project, "conv_id": conv_id,
+                        "usage": usage if isinstance(usage, dict) else None,
                     })
     except Exception:  # noqa: BLE001
         return out
     return out
 
 
-def _parse_opencode_db(db_path: str, date_str: str) -> list[dict]:
+def _parse_opencode_db(db_path: str, date_str: str, immutable: bool = True) -> list[dict]:
     """读 opencode.db（SQLite）当日消息：message 表含 role/modelID/time，part 表含 text。
 
-    只读、immutable 打开（不与守护竞争锁）；modelID 为会话级真实模型名。
-    时间戳 time_created 为毫秒 epoch。任何异常 → 空列表。
+    只读打开；immutable=True（opencode）不与守护竞争锁；zcode 的 db.sqlite 是
+    活跃 WAL 库，须 immutable=False 以 mode=ro 打开才能读到 WAL 未合并数据。
+    modelID 为会话级真实模型名。时间戳 time_created 为毫秒 epoch。任何异常 → 空列表。
     """
     import sqlite3  # noqa: PLC0415
     out: list[dict] = []
+    uri = f"file:{db_path}?mode=ro" + ("&immutable=1" if immutable else "")
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro&immutable=1", uri=True, timeout=2.0)
+        conn = sqlite3.connect(uri, uri=True, timeout=2.0)
     except Exception:  # noqa: BLE001
         return out
     try:
@@ -1193,12 +1231,300 @@ def _parse_opencode_db(db_path: str, date_str: str) -> list[dict]:
     return out
 
 
+def _dsh_session_roots(dirs: list[str]) -> list[str]:
+    """DSH 扫描根：会话集中在 <root>/sessions 子目录，只扫该子目录（存在时）。
+
+    避免遍历 ~/.dsh 下 profiles（Electron 应用）、storages、memories 等无关巨型
+    目录——尤其经 \\\\wsl.localhost UNC 访问时整树遍历极慢。无 sessions 子目录
+    时回退原目录（兼容老布局）。
+    """
+    out: list[str] = []
+    for d in dirs:
+        s = os.path.join(d, "sessions")
+        out.append(s if os.path.isdir(s) else d)
+    return out
+
+
+def _walk_dsh_files(dirs: list[str]) -> list[str]:
+    """DSH 专用文件发现：递归找 <dir>/**/session.jsonl.zstd。
+
+    只认 DSH 会话文件（session.jsonl.zstd），不把 ~/.dsh 下其他 json 当会话，
+    也不污染通用 _walk_files 的 .json/.jsonl/.ndjson 逻辑。
+    只扫 sessions 子目录（见 _dsh_session_roots），大幅降低 UNC 遍历开销。
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for base in sorted(_dsh_session_roots(dirs)):
+        if not os.path.isdir(base):
+            continue
+        for root, sub_dirs, files in os.walk(base):
+            sub_dirs[:] = sorted(d for d in sorted(sub_dirs) if d not in _SKIP_SCAN_DIRS)
+            for name in sorted(files):
+                if name != "session.jsonl.zstd":
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    if os.path.getsize(path) > _MAX_FILE_SIZE:
+                        continue
+                except OSError:
+                    continue
+                real = os.path.normcase(os.path.abspath(path))
+                if real not in seen:
+                    seen.add(real)
+                    out.append(path)
+    return out
+
+
+def _dsh_text_blocks(content: object) -> str:
+    """提取 DSH 消息 content（list of {type, text} 或 str）的文本。
+
+    与 _message_content 语义一致：把 text/reasoning 等文本块拼接。
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for p in content:
+            if isinstance(p, dict) and isinstance(p.get("text"), str):
+                parts.append(p["text"])
+            elif isinstance(p, str):
+                parts.append(p)
+        return "\n".join(parts)
+    if isinstance(content, dict):
+        t = content.get("text") or content.get("content")
+        return str(t) if isinstance(t, str) else ""
+    return ""
+
+
+def _dsh_may_contain(path: str, date_str: str) -> bool:
+    """DSH 会话 createdAt 早于/等于查询日才可能含当日消息（预检，避免全量解压）。
+
+    只解压首行（session 行）取 createdAt（ms epoch）；若会话创建**晚于**查询日，
+    则查询日当天不可能有该会话的消息 → 返回 False，跳过整文件。
+    保守原则：读不到/无 session 行/解析异常一律返回 True（宁可多解压不可漏数据）。
+    """
+    if not _HAS_ZSTD or not date_str:
+        return True
+    try:
+        end_ts = int(datetime.datetime.fromisoformat(date_str + "T23:59:59").timestamp() * 1000)
+    except (ValueError, TypeError):
+        return True
+    try:
+        with zstandard.open(path, "rt", encoding="utf-8", errors="replace") as fh:  # type: ignore[attr-defined]
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    if obj.get("type") == "session":
+                        created = obj.get("createdAt")
+                        if isinstance(created, (int, float)) and created > end_ts:
+                            return False
+                        return True
+                    # 首行不是 session：保守解析（可能消息行在前）
+                    return True
+    except Exception:  # noqa: BLE001 —— 读失败保守放行
+        return True
+    return True
+
+
+def _parse_dsh_file(path: str, date_str: str) -> list[dict]:
+    """解析 DSH 会话文件（~/.dsh/sessions/<proj>/<session>/session.jsonl.zstd）。
+
+    DSH 格式（Zstandard 压缩的 JSONL，逐行事件流）：
+    - session 行：{type:"session", id, cwd, createdAt(ms)}
+    - request/header 行：{type:"request/header", data:{header:{config:{provider, model}}}}
+      → 作为后续消息的当前 model 上下文
+    - user/message 行：{type:"user/message", time(ms), data:{role:"user", content:[{type:"text",text}]}}
+    - assistant/message 行：{type:"assistant/message", time(ms),
+      data:{message:{role:"assistant", content:[...]}, usage:{inputTokens, outputTokens}}}
+    返回与 _parse_pi_file 同构的 [{role, content, timestamp, model, usage, conv_id, project}]。
+    按 date_str 过滤当日消息。zstandard 缺失 / 解析异常 → 空列表。
+    """
+    if not _HAS_ZSTD:
+        return []
+    out: list[dict] = []
+    cur_model = "未识别"
+    project = None
+    conv_id = None
+    try:
+        with zstandard.open(path, "rt", encoding="utf-8", errors="replace") as fh:  # type: ignore[attr-defined]
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                typ = obj.get("type")
+                try:
+                    ts = datetime.datetime.fromtimestamp(int(obj.get("time")) / 1000.0).isoformat(timespec="seconds")
+                except (OSError, ValueError, TypeError, OverflowError):
+                    ts = None
+                if typ == "session":
+                    conv_id = str(obj.get("id") or "")[:48] or None
+                    cwd = obj.get("cwd")
+                    if cwd:
+                        project = os.path.basename(str(cwd).rstrip("/\\")) or None
+                elif typ == "request/header":
+                    header = obj.get("data")
+                    if isinstance(header, dict):
+                        header = header.get("header")
+                    if isinstance(header, dict):
+                        cfg = header.get("config")
+                        if isinstance(cfg, dict):
+                            prov = cfg.get("provider") or ""
+                            mod = cfg.get("model") or ""
+                            if mod:
+                                cur_model = _norm_pi_model(prov, mod)
+                elif typ in ("user/message", "assistant/message"):
+                    data = obj.get("data")
+                    if not isinstance(data, dict):
+                        continue
+                    if ts is not None and not ts.startswith(date_str):
+                        continue
+                    inner = data.get("message")
+                    if isinstance(inner, dict):
+                        role = inner.get("role")
+                        content = inner.get("content")
+                    else:
+                        role = data.get("role")
+                        content = data.get("content")
+                    if role not in _USER_ROLES and role not in _ASSISTANT_ROLES:
+                        continue
+                    usage = data.get("usage")
+                    if not isinstance(usage, dict):
+                        usage = None
+                    elif "inputTokens" in usage or "outputTokens" in usage:
+                        # 归一化为 snake_case，供 _message_usage 统一识别
+                        usage = {
+                            "input_tokens": usage.get("inputTokens"),
+                            "output_tokens": usage.get("outputTokens"),
+                        }
+                    out.append({
+                        "role": role,
+                        "content": _dsh_text_blocks(content),
+                        "timestamp": ts,
+                        "model": cur_model,
+                        "usage": usage,
+                        "conv_id": conv_id or os.path.basename(os.path.dirname(path))[:48],
+                        "project": project,
+                    })
+    except Exception:  # noqa: BLE001 —— 损坏/不兼容格式跳过
+        return out
+    return out
+
+
+def _parse_codex_file(path: str) -> list[dict]:
+    """解析 Codex CLI rollout 会话（~/.codex/sessions/**/*.jsonl）。
+
+    rollout 格式：每行 {timestamp(ISO-UTC), type, payload}——
+    - session_meta：payload.cwd → project，payload.id → conv 上下文
+    - turn_context：payload.model → 当前模型上下文（回填后续 assistant 消息）
+    - response_item(payload.type=message)：payload.role(user/assistant；developer/system
+      等不计) + payload.content[].text（input_text/output_text）
+    - event_msg(payload.type=token_count)：info.last_token_usage 是**单次请求增量**
+      （total_token_usage 为会话累计、不可求和）→ 累加归因到最近一条 assistant 消息，
+      保当日总量正确；跨日边界的事件归入响应所在日（近似，量级为单次请求）。
+    时间统一转本地时区再输出（文件内是 UTC，直接前缀匹配本地日期会偏移时区差）。
+    任何异常/损坏行 → 跳过，绝不抛。
+    """
+    out: list[dict] = []
+    cur_model = "未识别"
+    project = None
+    conv_id = None
+    last_asst: dict | None = None
+    try:
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(obj, dict):
+                    continue
+                typ = obj.get("type")
+                payload = obj.get("payload") if isinstance(obj.get("payload"), dict) else {}
+                ts = None
+                raw_ts = obj.get("timestamp")
+                if isinstance(raw_ts, str) and raw_ts:
+                    try:
+                        dt = datetime.datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                        if dt.tzinfo is not None:
+                            dt = dt.astimezone()  # UTC → 本地时区
+                        ts = dt.isoformat(timespec="seconds")
+                    except ValueError:
+                        ts = None
+                if typ == "session_meta":
+                    conv_id = str(payload.get("id") or payload.get("session_id") or "")[:48] or None
+                    cwd = payload.get("cwd")
+                    if cwd:
+                        project = os.path.basename(str(cwd).rstrip("/\\")) or None
+                elif typ == "turn_context":
+                    model = payload.get("model")
+                    if isinstance(model, str) and model.strip():
+                        cur_model = _clean_model(model.strip())
+                elif typ == "response_item" and payload.get("type") == "message":
+                    role = payload.get("role")
+                    if role not in _USER_ROLES and role not in _ASSISTANT_ROLES:
+                        continue  # developer/system 等上下文行不计
+                    parts: list[str] = []
+                    content = payload.get("content")
+                    if isinstance(content, list):
+                        for p in content:
+                            if isinstance(p, dict) and isinstance(p.get("text"), str):
+                                parts.append(p["text"])
+                            elif isinstance(p, str):
+                                parts.append(p)
+                    text = "\n".join(parts)
+                    if not text:
+                        continue
+                    msg = {
+                        "role": role, "content": text, "timestamp": ts,
+                        "model": cur_model if role in _ASSISTANT_ROLES else "未识别",
+                        "project": project,
+                        "conv_id": conv_id or os.path.basename(path)[:40],
+                        "usage": {},
+                    }
+                    out.append(msg)
+                    if role in _ASSISTANT_ROLES:
+                        last_asst = msg
+                elif typ == "event_msg" and payload.get("type") == "token_count":
+                    info = payload.get("info")
+                    inc = info.get("last_token_usage") if isinstance(info, dict) else None
+                    if isinstance(inc, dict) and last_asst is not None:
+                        n_in = inc.get("input_tokens")
+                        n_out = inc.get("output_tokens")
+                        usage = last_asst.setdefault("usage", {})
+                        if isinstance(n_in, (int, float)) and n_in >= 0:
+                            usage["input_tokens"] = usage.get("input_tokens", 0) + int(n_in)
+                        if isinstance(n_out, (int, float)) and n_out >= 0:
+                            usage["output_tokens"] = usage.get("output_tokens", 0) + int(n_out)
+    except Exception:  # noqa: BLE001 —— 损坏/不兼容格式跳过
+        return out
+    return out
+
+
 def _iter_tool_messages(tool: str, dirs: list[str], date_str: str,
                         parsed_paths: set) -> list[tuple[str, list[dict]]]:
     """按工具选择解析器，产出 (标识, messages) 列表。
 
     - opencode：先读 opencode.db（SQLite，真实 model/成本），再傅 json/jsonl 文件（向后兼容）
+    - zcode：cli 目录读 db/db.sqlite（opencode 同源 schema；活跃 WAL，mode=ro），
+      其余目录（v2/sessions 的 meta+messages JSON）走通用解析
+    - codex：rollout-*.jsonl 专用解析（turn_context 模型回填 + token_count 增量归因）
     - pi_agent：jsonl 用 pi 专用解析（model_change 上下文回填）
+    - dsh：.jsonl.zstd 专用解析（request/header 模型上下文 + inputTokens/outputTokens）
     - 其他：parse_file
     """
     out: list[tuple[str, list[dict]]] = []
@@ -1209,6 +1535,46 @@ def _iter_tool_messages(tool: str, dirs: list[str], date_str: str,
             if os.path.isfile(db) and key not in parsed_paths:
                 parsed_paths.add(key)
                 out.append((db, _parse_opencode_db(db, date_str)))
+    if tool == "zcode":
+        # cli 目录只认 db/db.sqlite（SQLite 消息库）；log/rollout 是噪声不进通用 walk。
+        # 其余目录（~/.zcode/v2/sessions 的 *.json）走下方通用解析。
+        walk_dirs: list[str] = []
+        for d in dirs:
+            db = os.path.join(d, "db", "db.sqlite")
+            if os.path.isfile(db):
+                key = os.path.normcase(os.path.abspath(db))
+                if key not in parsed_paths:
+                    parsed_paths.add(key)
+                    out.append((db, _parse_opencode_db(db, date_str, immutable=False)))
+                continue
+            walk_dirs.append(d)
+        dirs = walk_dirs
+        if not dirs:
+            return out
+    if tool == "codex":
+        # rollout-*.jsonl 专用解析（模型上下文回填 + token_count 增量归因）
+        for path in _walk_files_batched(dirs):
+            real = os.path.normcase(os.path.abspath(path))
+            if real in parsed_paths:
+                continue
+            parsed_paths.add(real)
+            out.append((path, _parse_file_cached(path, tag="codex")))
+        return out
+    if tool == "dsh":
+        # 未来日期：任何会话都尚未产生当日消息 → 整体短路（免扫描）
+        if date_str > datetime.date.today().isoformat():
+            return out
+        for path in _walk_dsh_files(dirs):
+            real = os.path.normcase(os.path.abspath(path))
+            if real in parsed_paths:
+                continue
+            parsed_paths.add(real)
+            # 会话创建晚于查询日 → 当日无消息，跳过（免全量解压）
+            if not _dsh_may_contain(path, date_str):
+                continue
+            msgs = _parse_file_cached(path, tag="dsh") if _HAS_ZSTD else []
+            out.append((path, msgs))
+        return out
     is_pi = tool == "pi_agent" or tool.startswith("pi")
     for path in _walk_files_batched(dirs):
         real = os.path.normcase(os.path.abspath(path))
@@ -1326,15 +1692,27 @@ def _parse_file_cached(path: str, *, tag: str = "gen") -> list[dict]:
         st = os.stat(path)
     except OSError:
         return []
-    if st.st_size > _PARSE_CACHE_MAX_FILE_BYTES:
-        return _parse_pi_file(path) if tag == "pi" else parse_file(path)
+    # dsh/codex 会话为压缩/大 JSONL、单文件可达数十 MB，仍须缓存避免每次 collect 重解析；
+    # 内存由 _PARSE_CACHE_BUDGET_BYTES 的 LRU 驱逐兜底。通用 tag 保留大小上限。
+    if st.st_size > _PARSE_CACHE_MAX_FILE_BYTES and tag not in ("dsh", "codex"):
+        if tag == "pi":
+            return _parse_pi_file(path)
+        return parse_file(path)
     key = (tag, os.path.normcase(os.path.abspath(path)), st.st_mtime_ns, st.st_size)
     with _PARSE_LOCK:
         hit = _PARSE_CACHE.get(key)
         if hit is not None:
             _PARSE_CACHE.move_to_end(key)
             return hit[1]
-    msgs = _parse_pi_file(path) if tag == "pi" else parse_file(path)  # 解析在锁外
+    if tag == "pi":
+        msgs = _parse_pi_file(path)
+    elif tag == "dsh":
+        # 日期过滤由 _collect_local 按 timestamp 统一处理，此处传空串返回全量消息。
+        msgs = _parse_dsh_file(path, "")
+    elif tag == "codex":
+        msgs = _parse_codex_file(path)
+    else:
+        msgs = parse_file(path)  # 解析在锁外
     with _PARSE_LOCK:
         _PARSE_CACHE[key] = (st.st_size, msgs)
         # 驱逐：任一上限越界即从最旧端淘汰（同键新 mtime 视为新条目，自然置顶）
@@ -1351,16 +1729,30 @@ def _paths_fingerprint(tool_paths: dict[str, list[str]]) -> str:
     parts: list[str] = []
     for tool in sorted(tool_paths):
         parts.append(tool)
-        for d in tool_paths[tool]:
+        dirs = _dsh_session_roots(tool_paths[tool]) if tool == "dsh" else tool_paths[tool]
+        for d in dirs:
             if not os.path.isdir(d):
                 continue
+            if tool == "zcode" and os.path.isfile(os.path.join(d, "db", "db.sqlite")):
+                # zcode cli 目录只指纹 db.sqlite(-wal)：整树 walk 会被 log/*.jsonl 的
+                # 每次追加打穿 mtime，令 collect 缓存永远失效
+                for rel in ("db/db.sqlite", "db/db.sqlite-wal"):
+                    p = os.path.join(d, rel)
+                    try:
+                        st = os.stat(p)
+                    except OSError:
+                        continue
+                    parts.append(f"{p}|{st.st_mtime_ns}|{st.st_size}")
+                continue
             parts.append(d)
-            for root, _dirs, files in os.walk(d):
+            for root, sub_dirs, files in os.walk(d):
+                sub_dirs[:] = [x for x in sub_dirs if x not in _SKIP_SCAN_DIRS]
                 for name in files:
                     low = name.lower()
                     is_db = (tool == "opencode" and root == os.path.dirname(
                         os.path.join(d, "opencode.db")) and low == "opencode.db")
-                    if not low.endswith((".json", ".jsonl", ".ndjson")) and not is_db:
+                    # dsh 会话为 .jsonl.zstd，纳入指纹以便 mtime/size 变化失效缓存
+                    if not (low.endswith((".json", ".jsonl", ".ndjson", ".zstd")) or is_db):
                         continue
                     p = os.path.join(root, name)
                     try:
@@ -1539,7 +1931,10 @@ def collect(date_str: str, config: dict, web_visits: list[dict] | None = None) -
 
     # Web AI 会话（浏览器历史深度解析）
     web_ai = empty_web
-    if bool(section.get("web_ai", {}).get("enabled", True)) and web_visits:
+    web_cfg = section.get("web_ai", {})
+    # 配置容错：dict 走 enabled 键；布尔/其他标量直接当开关（此前非 dict 会 AttributeError）
+    web_enabled = web_cfg.get("enabled", True) if isinstance(web_cfg, dict) else bool(web_cfg)
+    if bool(web_enabled) and web_visits:
         web_ai = web_ai_sessions(web_visits)
     return {
         "date": date_str,

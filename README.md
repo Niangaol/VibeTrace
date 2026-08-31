@@ -112,7 +112,7 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 - 离线规则引擎：学习 / 游戏 / 健康 / 效率 / 平衡 / 趋势建议
 - 个性化基线（v2.7「简单学习」）：滑动窗口 + z-score 在线统计学习，"今日比你的常态偏离 N σ"类洞察，越用越准、零依赖零预设阈值
 - 可选 AI 洞察：OpenAI 兼容端点，聚合统计隐私过滤，默认关闭
-- AI 会话深度统计：读取 opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH 本地会话文件（各工具支持程度与扩展方法见 [docs/HARNESSES.md](docs/HARNESSES.md)）；Token 优先读会话内真实 usage 字段，缺失时按字符类别加权估算（`token_estimation_mode: weighted|simple`）
+- AI 会话深度统计：读取 opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH / ZCode / Codex 本地会话文件（各工具支持程度与扩展方法见 [docs/HARNESSES.md](docs/HARNESSES.md)）；Token 优先读会话内真实 usage 字段，缺失时按字符类别加权估算（`token_estimation_mode: weighted|simple`）
 - 告警闭环（v2.7）：AI 成本预算接近/超支、连续工作休息提醒——托盘气泡主动通知，阈值/冷却可配
 - 每日目标（v2.7 · 可选）：总活跃/编码时长目标 + 连续达成天数，概览页进度面板，默认关闭
 - 采纳率代理（v2.8 · 仅参考）：Git 侧 retention / 返工率粗代理（`/api/adoption`），洞察页折叠 + 灰色降权 + 强制免责声明，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍
@@ -123,7 +123,7 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 - 应用分组自定义：覆盖层配置，实时生效
 - 常用软件显示名 / 分类：Obsidian / Notion / Slack / Teams / Steam / Spotify / VLC / PowerToys 等
 - 浏览器适配：Vivaldi / Yandex / Chromium / Opera GX / Arc / Cent / 搜狗 / 傲游 / Slimjet 等
-- AI 工具识别：Codex / Goose / Amazon Q / DSH / Claude Code / Gemini CLI / Continue / Bamboo / Augment / Warp 等
+- AI 工具识别：Codex / Goose / Amazon Q / DSH / Claude Code / Gemini CLI / Continue / Bamboo / Augment / Warp / ZCode 等
 - 终端 TUI 工具：tmux / btop / lazygit / k9s / lazydocker / kubectl / fzf / rg / ncdu / tig 等
 
 ### Updates & packaging
@@ -233,7 +233,7 @@ AI 编程深度追踪规划：
 
 
 ```powershell
-python -m pytest tests -q   # 约499项用例（单测/集成/API/安全/性能/E2E 全链路）
+python -m pytest tests -q   # 约670项用例（单测/集成/API/安全/性能/E2E 全链路）
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 违规

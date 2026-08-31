@@ -109,3 +109,86 @@ def test_collect_weighted_mode_counts_symbols_higher(tmp_path):
     s = ai_sessions.collect(day, cfg_s)["total"]["tokens_out"]
     assert w > s, f"符号密集文本 weighted({w}) 应高于 simple({s})"
     print("  [PASS] collect_weighted_mode_counts_symbols_higher")
+
+
+def _write_pi_fixture(root: str, day: str, rows: list[dict]) -> None:
+    """写 pi_agent 会话 jsonl（message.usage 为 input/output 风格）。"""
+    sess_dir = os.path.join(root, "pi_sess")
+    os.makedirs(sess_dir, exist_ok=True)
+    with open(os.path.join(sess_dir, "p.jsonl"), "w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def test_pi_parse_preserves_message_usage(tmp_path):
+    """pi 消息的 message.usage（input/output）被保留且被 _message_usage 识别。"""
+    day = "2099-08-10"
+    root = str(tmp_path)
+    _write_pi_fixture(root, day, [
+        {"type": "session", "timestamp": f"{day}T08:00:00", "cwd": "/proj"},
+        {"type": "model_change", "timestamp": f"{day}T08:00:01",
+         "provider": "stepplan", "modelId": "step-3.7-flash"},
+        {"type": "message", "timestamp": f"{day}T08:00:02",
+         "message": {"role": "assistant",
+                     "content": [{"type": "text", "text": "hi"}],
+                     "provider": "stepplan", "model": "step-3.7-flash",
+                     "usage": {"input": 8064, "output": 182}}},
+    ])
+    msgs = ai_sessions._parse_pi_file(os.path.join(root, "pi_sess", "p.jsonl"))
+    assert len(msgs) == 1
+    assert msgs[0]["usage"] == {"input": 8064, "output": 182}
+    assert msgs[0]["model"] == "step-3.7-flash"  # 每消息 model 优先
+    assert ai_sessions._message_usage(msgs[0]) == (8064, 182)
+    print("  [PASS] pi_parse_preserves_message_usage")
+
+
+def test_pi_collect_uses_real_usage(tmp_path):
+    """pi_agent 会话走 collect 时 token 用真实 message.usage，非内容估算。"""
+    day = "2099-08-11"
+    root = str(tmp_path)
+    _write_pi_fixture(root, day, [
+        {"type": "session", "timestamp": f"{day}T08:00:00", "cwd": "/proj"},
+        {"type": "model_change", "timestamp": f"{day}T08:00:01",
+         "provider": "stepplan", "modelId": "step-3.7-flash"},
+        {"type": "message", "timestamp": f"{day}T08:00:02",
+         "message": {"role": "assistant",
+                     "content": [{"type": "text", "text": "x" * 400}],
+                     "provider": "stepplan", "model": "step-3.7-flash",
+                     "usage": {"input": 8064, "output": 182}}},
+    ])
+    cfg = {"ai_sessions": {"enabled": True,
+                           "paths": {"pi_agent": [os.path.join(root, "pi_sess")]}}}
+    data = ai_sessions.collect(day, cfg)
+    st = data["tools"].get("pi_agent")
+    assert st is not None, f"pi_agent 应在 tools 中，实际 {list(data['tools'])}"
+    assert st["tokens_in"] == 8064
+    assert st["tokens_out"] == 182
+    assert st["tokens_from_usage"] == 1
+    assert st["by_model"]["step-3.7-flash"]["turns"] == 1
+    print("  [PASS] pi_collect_uses_real_usage")
+
+
+def test_pi_per_message_model(tmp_path):
+    """pi 每消息自带 model 时按各自 model 归属，而非全部用 model_change 上下文。"""
+    day = "2099-08-12"
+    root = str(tmp_path)
+    _write_pi_fixture(root, day, [
+        {"type": "session", "timestamp": f"{day}T08:00:00", "cwd": "/proj"},
+        {"type": "model_change", "timestamp": f"{day}T08:00:01",
+         "provider": "stepplan", "modelId": "ctx-model"},
+        {"type": "message", "timestamp": f"{day}T08:00:02",
+         "message": {"role": "assistant", "content": "a",
+                     "provider": "stepplan", "model": "model-a",
+                     "usage": {"input": 100, "output": 10}}},
+        {"type": "message", "timestamp": f"{day}T08:00:03",
+         "message": {"role": "assistant", "content": "b",
+                     "provider": "stepplan", "model": "model-b",
+                     "usage": {"input": 200, "output": 20}}},
+    ])
+    cfg = {"ai_sessions": {"enabled": True,
+                           "paths": {"pi_agent": [os.path.join(root, "pi_sess")]}}}
+    st = ai_sessions.collect(day, cfg)["tools"]["pi_agent"]
+    assert st["by_model"]["model-a"]["turns"] == 1
+    assert st["by_model"]["model-b"]["turns"] == 1
+    assert "ctx-model" not in st["by_model"]  # 每消息 model 覆盖上下文
+    print("  [PASS] pi_per_message_model")

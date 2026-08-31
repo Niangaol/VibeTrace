@@ -35,7 +35,7 @@
 - ✅ 可选 SQLite 后端与一致性校验（JSONL 仍为原始事实源）
 - ✅ 纯 Python + ctypes，零第三方运行时依赖
 - ✅ 打包为独立 exe，支持安装/卸载、应用内更新
-- ✅ 统一测试体系：pytest ~499 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役；新增并发锤/配置流/暂停退出等回归钉扎）
+- ✅ 统一测试体系：pytest ~670 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役；新增并发锤/配置流/暂停退出等回归钉扎）
 - ✅ ROADMAP Phase 1：对话轮次 / Token 估算 / 按模型·项目拆分 / 会话详情面板与日报章节
 - ✅ ROADMAP Phase 3：按模型费用估算 / 按项目成本分摊 / 成本面板与日报成本章节（+ 周/月汇总成本账本）
 - ✅ ROADMAP Phase 4：死循环检测 + 专注度评分 + Vibe 编程人格分析（洞察页面板与日报今日建议）
@@ -50,7 +50,7 @@
 - ✅ 每日目标 streak（`goals.py`：总活跃/编码时长目标 + 连续达成天数）
 - ✅ 个性化基线（`learn.py`：滑动窗口 + z-score 常态检测）
 - ✅ 性能指纹缓存（ai_sessions / browser_history / sqlite_store 提速）
-- ✅ 覆盖率门禁 70%（pytest ~499 项，实测 80%）
+- ✅ 覆盖率门禁 70%（pytest ~670 项，实测 80%）
 - ✅ Git 侧采纳率代理指标（`adoption.py` + `/api/adoption`：retention/reworked_ratio 粗代理，免责+折叠展示，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍）
 - ✅ 受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势，双周期解析与周期别名）
 - ✅ dashboard 纯函数外置 `dashboard_util.py` + frontend smoke / e2e 冒烟测试上线
@@ -213,8 +213,8 @@ A：分阶段推进，每个 Phase 都可以独立交付，不必一次性完成
 
 | 维度 | 状态 |
 |------|------|
-| 版本 | v2.8.2 已发布；批次二修复在 master `[未发布]`，随批次三一起发 |
-| 测试 | pytest ~499 用例 / 七层（unit/integration/api/security/performance/frontend/e2e），全链路 E2E 七阶段一条龙 |
+| 版本 | v2.9.2 已发布 |
+| 测试 | pytest ~670 用例 / 七层（unit/integration/api/security/performance/frontend/e2e），全链路 E2E 七阶段一条龙 |
 | 覆盖率 | 实测 **80%**（门禁 70%，红线 ≥78%） |
 | 静态检查 | ruff 零违规为合入前提 |
 | 缓存架构 | 五处模块级缓存全部有锁（collect/parse LRU、agg、aliases、days-cache）；枚举字节级确定是缓存正确性前提 |

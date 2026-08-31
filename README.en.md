@@ -111,7 +111,7 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 
 - Offline rule engine: study / game / health / efficiency / balance / trend advice
 - Optional AI insights: OpenAI-compatible endpoint, privacy-filtered aggregates, off by default
-- AI session deep stats: reads local session files from opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH (per-tool support matrix and extension guide: [docs/HARNESSES.md](docs/HARNESSES.md), Chinese)
+- AI session deep stats: reads local session files from opencode / ChatGPT / Claude / Cursor / Windsurf / Trae / DeepSeek / Pi Agent / DSH / ZCode / Codex (per-tool support matrix and extension guide: [docs/HARNESSES.md](docs/HARNESSES.md), Chinese)
 - Alert loop (v2.7): AI cost budget warn/exceed + continuous-work rest reminders via tray balloon, configurable thresholds/cooldown
 - Daily goals (v2.7 · optional): total active / coding time targets with streak counter, overview progress panel, off by default
 - Adoption proxy (v2.8 · reference only): Git-side retention / rework rough proxies (`/api/adoption`), shown collapsed & greyed-out with a mandatory disclaimer; confidence never "high"; AI-side per-file attribution cut per the spike conclusion
@@ -122,7 +122,7 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 - Custom app grouping: overlay config, effective immediately
 - Common app display names / classification: Obsidian / Notion / Slack / Teams / Steam / Spotify / VLC / PowerToys, etc.
 - Browser adaptation: Vivaldi / Yandex / Chromium / Opera GX / Arc / Cent / Sogou / Maxthon / Slimjet, etc.
-- AI tool recognition: Codex / Goose / Amazon Q / DSH / Claude Code / Gemini CLI / Continue / Bamboo / Augment / Warp, etc.
+- AI tool recognition: Codex / Goose / Amazon Q / DSH / Claude Code / Gemini CLI / Continue / Bamboo / Augment / Warp / ZCode, etc.
 - Terminal TUI tools: tmux / btop / lazygit / k9s / lazydocker / kubectl / fzf / rg / ncdu / tig, etc.
 
 ### Updates & packaging
@@ -219,7 +219,7 @@ Each phase can be delivered independently. Full plan: [docs/ROADMAP.md](docs/ROA
 ## Running tests
 
 ```powershell
-python -m pytest tests -q   # ~499 test cases (unit / integration / API / security / performance / full-chain E2E)
+python -m pytest tests -q   # ~670 test cases (unit / integration / API / security / performance / full-chain E2E)
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 violations

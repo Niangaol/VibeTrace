@@ -8,6 +8,39 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [2.9.3] - 2026-08-31
+
+> 主题：vibe coding 指标修正（growth 三指标复活 + insights 两处假数据）+ 新增 ZCode / Codex 会话深度适配 + DSH zstd 会话支持（补录此前未提交的工作区改动）。
+
+### 新特性
+- **ZCode 适配（双数据源）**：`ai_keywords`/`ai_tool_names` 新增 zcode（进程/标题计时识别）；会话深度读取 `~/.zcode/cli/db/db.sqlite`（opencode 同源 schema：session/message/part，活跃 WAL 库以 `mode=ro` 只读，modelID 真实模型名）与 `~/.zcode/v2/sessions/*.json`（meta+messages 走通用解析，ms epoch）；`_paths_fingerprint` 对 cli 目录只 stat db.sqlite(-wal)，防 log/*.jsonl 追加打穿 collect 缓存
+- **Codex CLI 适配**：新增 `_parse_codex_file` 专用解析器（`~/.codex/sessions/**/*.jsonl` rollout 格式）：session_meta→cwd/会话 id、turn_context→模型上下文回填、response_item(message)→user/assistant 消息（developer 跳过）、event_msg(token_count) 的 `last_token_usage` 单次增量累加归因到最近一条 assistant（真实用量口径；`total_token_usage` 为会话累计不可求和）；UTC 时间戳统一转本地时区再匹配日期；大文件豁免 2MB 解析缓存上限（同 dsh 先例）
+- **DSH zstd 会话支持**：`_parse_dsh_file` 解析 `session.jsonl.zstd`（request/header 提供模型上下文，assistant 真实 inputTokens/outputTokens 归一化，user→assistant 配对计轮）；`_walk_dsh_files` 只认会话文件；`_dsh_may_contain` 按 createdAt 预检免全量解压；`_SKIP_SCAN_DIRS` 剪枝 node_modules 等重型目录；zstandard 为可选依赖（缺库优雅降级为空）；PyInstaller spec `collect_all('zstandard')` 打包 C 扩展；`_message_usage` 识别 inputTokens/outputTokens 与 totalTokens 兜底
+
+### 修复
+- **成长指标三连修复（v2.9.2 回归收尾）**：`model_diversity_entropy` 数据源从不存在的 `agg.get("by_model")`（report.aggregate 不产出该键）改为 `ai_sessions.collect` 的 `total.by_model`——v2.9.2 修复"张冠李戴"时误改数据源，此后该指标恒 None；`prompt_efficiency` 分母从不存在的 `total.get("sessions")` 改为 conversations 条数——此前恒 0；增量合并写入的幽灵键 `project_focus_hhi` 修正为前端契约键 `focus_hhi`（此前增量更新后该指标永远冻结）；周快照新增 `ai_sessions` 会话计数字段并按"总生成行/总会话数"重写 prompt_efficiency 增量合并公式（旧公式引用不存在的 `ai_sessions` 死键）
+- **学习曲线假洞察**：`rule_insights` 学习规则删除"curr_ai==0 时用总活跃时长顶替"的兜底——此前"昨日有用 AI、今日没用"会反报"AI 使用时长较昨日增长 N%"假卡
+- **Vibe 人格 ai_ratio 死键**：persona_insights 的 by_ai 回退从不存在的"总计"键改为 values() 求和（v2.9.2 在 rule_insights 修过同类，此处补齐）
+- **deep_work 跨大间隙合并**：activitywatch_metrics 的编码连续块新增间隔上限 `insights.behavior.deep_work_max_gap_s`（默认 300s）——此前只按序列相邻累加，上午/傍晚两段编码会因中间无会话记录被串成同一个"连续深度块"；顺带移除只写不读的 block_start 死变量
+- **web_ai 配置容错**：`ai_sessions.web_ai` 配成布尔/标量不再 AttributeError（dict 走 enabled 键，其他形态直接当开关）
+
+### 测试（2.9.3）
+- 新增 tests/unit/test_zcode_support.py（6 项：SQLite 解析/collect 全链路/v2 JSON 通用解析/默认路径注册/指纹 WAL 失效/log 噪声剪枝）与 tests/unit/test_codex_parser.py（5 项：解析与 developer 跳过/usage 增量归因/collect 真实 token/UTC→本地日期边界/坏行跳过）
+- growth 三指标断言钉扎（周聚合 + 增量合并双路径）、insights 学习曲线/persona/deep_work/web_ai 四项行为钉扎
+- 全量回归 670 passed, 0 failed
+
+## [2.9.2] - 2026-08-26
+
+### 修复
+- **Git 深度分析崩溃**：analyze_repo_deep 使用 `_parse_numstat` 返回的 `date` 字段（ISO 字符串），但代码误用 `c.get("ts")` 始终取到 None，导致 `ts_sorted` 未赋值即引用 → UnboundLocalError。开启 `insights.git.deep: true` 时任何有提交的仓库直接崩溃。修复：统一解析 `date` → `fromisoformat().timestamp()`，`ts_sorted` 前置初始化为 `[]`，补 `import datetime`
+- **学习曲线洞察死代码**：`rule_insights` 学习规则读取 `(prev_agg.get("by_ai") or {}).get("total_active_ms")`，但 `by_ai` 是 `{tool: ms}` 扁平映射，该键永远不存在 → prev_ai/curr_ai 恒为 0 → 规则永不触发。修复：改为 `sum(...values())`
+- **成长指标张冠李戴**：`_aggregate_week` 中 `model_diversity_entropy` 实际塞入的是 app 切换熵（activitywatch_metrics 的 `switch_entropy`），不是模型多样熵。`_merge_incremental` 增量路径也存在同样问题。修复：两处统一改为从 `by_model` 的 `turns` 字段计算 Shannon 熵
+- **对比视图加载态/空态 colspan 不一致**：加载态 `colspan="11"` 而表头 12 列、空态已改 12。修复：加载态也改为 `colspan="12"`
+- **增量合并死变量**：`_merge_incremental` 中 `aggs` 循环赋值但从未读取。修复：移除
+
+### 测试（2.9.2）
+- 全量回归 643 passed, 0 failed
+
 ## [2.9.1] - 2026-08-26
 
 ### 新特性
@@ -22,18 +55,6 @@
 
 ### 测试（2.9.1）
 - 新增 4 个单元测试文件共 137 个函数（model_regex/pricing_table/agent_paths/git_auto_discover）
-- 全量回归 643 passed, 0 failed
-
-## [2.9.2] - 2026-08-26
-
-### 修复
-- **Git 深度分析崩溃**：analyze_repo_deep 使用 `_parse_numstat` 返回的 `date` 字段（ISO 字符串），但代码误用 `c.get("ts")` 始终取到 None，导致 `ts_sorted` 未赋值即引用 → UnboundLocalError。开启 `insights.git.deep: true` 时任何有提交的仓库直接崩溃。修复：统一解析 `date` → `fromisoformat().timestamp()`，`ts_sorted` 前置初始化为 `[]`，补 `import datetime`
-- **学习曲线洞察死代码**：`rule_insights` 学习规则读取 `(prev_agg.get("by_ai") or {}).get("total_active_ms")`，但 `by_ai` 是 `{tool: ms}` 扁平映射，该键永远不存在 → prev_ai/curr_ai 恒为 0 → 规则永不触发。修复：改为 `sum(...values())`
-- **成长指标张冠李戴**：`_aggregate_week` 中 `model_diversity_entropy` 实际塞入的是 app 切换熵（activitywatch_metrics 的 `switch_entropy`），不是模型多样熵。`_merge_incremental` 增量路径也存在同样问题。修复：两处统一改为从 `by_model` 的 `turns` 字段计算 Shannon 熵
-- **对比视图加载态/空态 colspan 不一致**：加载态 `colspan="11"` 而表头 12 列、空态已改 12。修复：加载态也改为 `colspan="12"`
-- **增量合并死变量**：`_merge_incremental` 中 `aggs` 循环赋值但从未读取。修复：移除
-
-### 测试（2.9.2）
 - 全量回归 643 passed, 0 failed
 
 ## [2.9.0] - 2026-08-25
