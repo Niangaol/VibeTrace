@@ -295,3 +295,52 @@ class TestCompareToolsPending:
         res2 = tool_compare.compare_tools(["2026-08-10"], "<root>", {})
         assert {t["tool"] for t in res2["tools"]} == {"opencode", "chatgpt"}
         assert res2["tools"][0]["generated_chars"] == 60000
+
+# ---------------------------------------------------------------------------
+# 缓存三分项透传（v2.9+）：tokens_input_fresh / tokens_cache_read / tokens_cache_write
+# ---------------------------------------------------------------------------
+class TestMergeCacheFields:
+    """_merge_tool_stats / _merge_dim 对带/不带新字段的 day rows 都能容错求和。"""
+
+    def test_merge_tool_stats_cache_fields_summed(self):
+        """新旧两天的行混并：带新字段的求和，缺字段的行贡献 0，不抛 KeyError。"""
+        row_new = {  # v2.9+ 新结构：带缓存三分项
+            "turns": 3, "tokens_in": 960, "tokens_out": 20, "tokens_total": 980,
+            "tokens_input_fresh": 10, "tokens_cache_read": 900, "tokens_cache_write": 50,
+            "cost_total": 0.001, "by_model": {}, "by_project": {}, "conversations": [],
+        }
+        row_old = {  # 旧结构：没有三分项键
+            "turns": 2, "tokens_in": 100, "tokens_out": 10, "tokens_total": 110,
+            "cost_total": 0.002, "by_model": {}, "by_project": {}, "conversations": [],
+        }
+        merged = tool_compare._merge_tool_stats([row_new, row_old])
+        assert merged["turns"] == 5
+        assert merged["tokens_in"] == 1060 and merged["tokens_total"] == 1090
+        # 新字段只来自 row_new（row_old 缺键按 0 计，不抛异常）
+        assert merged["tokens_input_fresh"] == 10
+        assert merged["tokens_cache_read"] == 900
+        assert merged["tokens_cache_write"] == 50
+
+    def test_merge_tool_stats_all_old_rows_keep_none(self):
+        """全部为旧行（任何一天都没有三分项）：字段保持 None（下游以 or 0 消费）。"""
+        row_old = {"turns": 1, "tokens_in": 5, "tokens_total": 5,
+                   "by_model": {}, "by_project": {}, "conversations": []}
+        merged = tool_compare._merge_tool_stats([row_old, dict(row_old)])
+        assert merged["tokens_input_fresh"] is None
+        assert merged["tokens_cache_read"] is None
+        assert merged["tokens_cache_write"] is None
+
+    def test_merge_dim_cache_fields_tolerance(self):
+        """by_model 维度合并：旧条目缺缓存键不炸，新条目正常累加。"""
+        target: dict = {}
+        # 旧结构条目（无 tokens_input_fresh 等键）
+        tool_compare._merge_dim(target, {"m": {"turns": 2, "tokens_in": 5, "tokens_total": 5}})
+        # 新结构条目（带三分项）
+        tool_compare._merge_dim(target, {"m": {"turns": 3, "tokens_in": 7, "tokens_total": 7,
+                                               "tokens_input_fresh": 7,
+                                               "tokens_cache_read": 0,
+                                               "tokens_cache_write": 0}})
+        m = target["m"]
+        assert m["turns"] == 5 and m["tokens_in"] == 12
+        assert m["tokens_input_fresh"] == 7
+        assert m["tokens_cache_read"] == 0 and m["tokens_cache_write"] == 0

@@ -113,3 +113,63 @@ def test_read_sessions_tolerates_missing_file(tmp_path):
     sessions = report.read_sessions("2099-05-08", str(tmp_path))
     assert sessions == []
     print("  [PASS] read_sessions_tolerates_missing_file")
+
+
+# ---------------------------------------------------------------------------
+# _ai_sessions_daily 文案：tokens_from_usage>0 → 「真实 usage（含缓存）」；=0 → 「估算」
+# ---------------------------------------------------------------------------
+def _write_ai_report_env(root: str, sess_dir: str, *, token_est: bool = True) -> None:
+    """在 <root>/config.json 写最小 ai_sessions 配置（paths 指向会话目录，关浏览器扫描）。"""
+    cfg = {
+        "data_root": root,
+        "browser_history_enabled": False,  # 不触发真实浏览器库扫描
+        "ai_sessions": {"enabled": True, "token_estimation": token_est,
+                        "web_ai": {"enabled": False}, "paths": {"claude": [sess_dir]}},
+    }
+    with open(os.path.join(root, "config.json"), "w", encoding="utf-8") as fh:
+        json.dump(cfg, fh, ensure_ascii=False)
+
+
+def test_ai_sessions_daily_real_usage_wording(tmp_path):
+    """消息带真实 usage（含缓存）时，文案称「真实 usage（含缓存）」而非「估算」。"""
+    root = tmp_path / "rep_real"
+    sess = root / "claude"
+    sess.mkdir(parents=True)
+    day = "2099-05-10"
+    line = {"type": "assistant", "timestamp": f"{day}T10:00:00",
+            "message": {"role": "assistant", "model": "claude-sonnet-4-5",
+                        "content": [{"type": "text", "text": "你好"}],
+                        "usage": {"input_tokens": 10, "output_tokens": 20,
+                                  "cache_read_input_tokens": 900,
+                                  "cache_creation_input_tokens": 50}}}
+    (sess / "a.jsonl").write_text(json.dumps(line, ensure_ascii=False) + "\n",
+                                  encoding="utf-8")
+    _write_ai_report_env(str(root), str(sess))
+    out = report._ai_sessions_daily(day, str(root))
+    assert out, "有当日会话数据时章节应生成（非 None）"
+    assert "真实 usage（含缓存）" in out
+    assert "Token 估算 进" not in out          # 不得再称「估算」
+    assert "Token 优先取会话内真实 usage（含缓存）" in out
+    print("  [PASS] ai_sessions_daily_real_usage_wording")
+
+
+def test_ai_sessions_daily_estimated_wording(tmp_path):
+    """无任何 usage（纯估算）时保留原「Token 估算」措辞。"""
+    root = tmp_path / "rep_est"
+    sess = root / "claude"
+    sess.mkdir(parents=True)
+    day = "2099-05-11"
+    recs = [
+        {"role": "user", "content": "你好世界", "timestamp": f"{day}T10:00:00"},
+        {"role": "assistant", "content": "回复内容", "timestamp": f"{day}T10:00:05"},
+    ]
+    (sess / "b.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in recs) + "\n",
+        encoding="utf-8")
+    _write_ai_report_env(str(root), str(sess), token_est=True)
+    out = report._ai_sessions_daily(day, str(root))
+    assert out, "有当日会话数据时章节应生成（非 None）"
+    assert "Token 估算 进" in out
+    assert "Token 为长度折算的估算值" in out
+    assert "真实 usage（含缓存）" not in out  # 无 usage 不得称「真实」
+    print("  [PASS] ai_sessions_daily_estimated_wording")

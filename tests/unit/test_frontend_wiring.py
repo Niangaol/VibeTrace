@@ -90,3 +90,53 @@ def test_query_panel_present():
     assert 'id="qInput"' in html
     assert 'id="qGo"' in html
     assert 'id="qAnswer"' in html
+
+
+def test_loadoverview_only_awaits_day_endpoint():
+    """概览除首个 /api/day 外不得串行 await，其余面板并发加载（heatmap 保持非阻塞）。"""
+    html = _template()
+    m = re.search(r"async function loadOverview\(\)\{(.*?)\n\}", html, re.S)
+    assert m, "未找到 loadOverview 函数"
+    body = m.group(1)
+    # 卡片渲染依赖单日聚合，必须先 await /api/day
+    assert 'await api("/api/day?date="' in body, "loadOverview 必须先 await /api/day"
+    # 其余面板各自渲染各自 DOM，无顺序依赖，一律非阻塞
+    for ep in ["/api/urls", "/api/ai-sessions", "/api/budget", "/api/goals", "/api/days"]:
+        assert f'await api("{ep}' not in body, f"loadOverview 仍在串行 await {ep}"
+        assert f'api("{ep}' in body, f"loadOverview 丢失 {ep} 调用"
+    # heatmap 刻意不 await 的既定写法必须原样保留
+    assert 'api("/api/heatmap?days=28&tokens=1").then(' in body, "heatmap 非阻塞调用被改动"
+
+
+def test_compare_iso_uses_local_date():
+    """B2：对比页日期必须走本地时区 localDateStr，禁止 toISOString（UTC 会让东八区零点倒退一天）。"""
+    html = _template()
+    m = re.search(r"async function loadCompare\(\)\{(.*?)\n\}", html, re.S)
+    assert m, "未找到 loadCompare 函数"
+    body = m.group(1)
+    assert "toISOString" not in body, "loadCompare 仍使用 UTC 取日期，东八区会偏移一天"
+    assert "localDateStr" in body, "loadCompare 未复用 localDateStr 生成本地日期"
+
+
+def test_compare_default_range_and_loading_feedback():
+    """对比页默认 14 天（首次请求慢，不让用户开页就等大区间），且有耗时预期文案与失败提示。"""
+    html = _template()
+    assert "let cmpDays = 14;" in html, "对比页默认区间应为 14 天"
+    assert '<button class="btn primary" data-cmp="14">' in html, "默认高亮的区间按钮应为 14 天"
+    m = re.search(r"async function loadCompare\(\)\{(.*?)\n\}", html, re.S)
+    assert m, "未找到 loadCompare 函数"
+    body = m.group(1)
+    assert "对比计算中" in body, "对比请求期间缺少耗时预期加载文案"
+    assert "对比加载失败" in body, "对比请求失败缺少错误提示（裸 await 会卡在加载中）"
+
+
+def test_loadoverview_callbacks_guard_against_stale_day():
+    """换日后旧一轮慢响应必须作废：非阻塞回调带日期守卫，防旧日期数据覆盖新面板。"""
+    html = _template()
+    m = re.search(r"async function loadOverview\(\)\{(.*?)\n\}", html, re.S)
+    assert m, "未找到 loadOverview 函数"
+    body = m.group(1)
+    assert "const day = state.day;" in body, "loadOverview 未在开头捕获本轮日期"
+    # urls / heatmap / ai-sessions / budget / goals / days 六个非阻塞请求，至少各一处守卫
+    assert body.count("state.day !== day") >= 6, \
+        "非阻塞回调缺少日期守卫（state.day !== day 应至少出现 6 次）"

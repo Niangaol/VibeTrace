@@ -32,6 +32,7 @@ import ai_sessions  # 只读复用（collect → 成本/tokens/产出/质量）
 import git_insights  # 只读复用（git_insights → Git 产出）
 import insights  # 只读复用（behavior_insights → focus_score）
 import report  # 只读复用（aggregate → by_ai 前台分钟 / sessions）
+import tool_registry  # 只读复用（resolve_tool：tool 参数的两套命名归一）
 
 # ---------------------------------------------------------------------------
 # 默认配置（读 config.query；风格对齐 tool_compare.compare_config）
@@ -340,10 +341,27 @@ def template_list() -> list[dict]:
 def _resolve_cost(days: list[str], params: dict, data_root: str, config: dict) -> dict:
     """T1：AI 成本统计（复用 ai_sessions.collect + report.aggregate）。
 
-    tool 缺省=全体；带 tool 时只统计该工具（对 collect().tools 键模糊子串匹配）。
+    tool 缺省=全体；带 tool 时只统计该工具（先经 tool_registry 归一到 canonical
+    键精确匹配，归一不了再回退 collect().tools / by_ai 键的模糊子串匹配）。
     返回 {start, end, days, rows[], totals{}, by_tool[], notice}。
     """
     tool = (params.get("tool") or "").strip().lower() or None
+    # tool 参数经注册表归一（"pi agent"/"pi-agent" → pi_agent 键），归一不了再走
+    # 原有子串模糊匹配（保持容错：自定义/未知工具名行为不变）
+    spec = tool_registry.resolve_tool(tool) if tool else None
+    want = spec.key if spec is not None else None
+
+    def _name_matches(name: object) -> bool:
+        """collect/by_ai 键与 tool 参数比对：canonical 精确命中或子串兜底。"""
+        s = str(name)
+        if want is not None:
+            if s == want:
+                return True
+            spec = tool_registry.resolve_tool(s)
+            if spec is not None and spec.key == want:
+                return True
+        return tool in s.lower()
+
     rows: list[dict] = []
     totals = {"cost": 0.0, "tokens": 0, "rounds": 0, "minutes": 0.0}
     by_tool: dict[str, dict] = {}
@@ -353,7 +371,7 @@ def _resolve_cost(days: list[str], params: dict, data_root: str, config: dict) -
         if tool:
             stats = None
             for key, val in ((col or {}).get("tools") or {}).items():
-                if tool in str(key).lower():
+                if _name_matches(key):
                     stats = val
                     break
             row = {
@@ -361,7 +379,7 @@ def _resolve_cost(days: list[str], params: dict, data_root: str, config: dict) -
                 "tokens": int((stats or {}).get("tokens_total") or 0),
                 "rounds": int((stats or {}).get("rounds") or 0),
                 "minutes": round(sum(ms for t, ms in by_ai.items()
-                                     if tool in str(t).lower()) / 60000.0, 1),
+                                     if _name_matches(t)) / 60000.0, 1),
             }
         else:
             total = (col or {}).get("total") or {}

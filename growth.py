@@ -24,6 +24,7 @@ from urllib.parse import parse_qs, urlparse
 import ai_sessions
 import git_insights
 import insights
+import metrics_util  # 统计辅助单一来源：熵/HHI/工具切换计数（纯函数，无业务依赖）
 import report
 
 # ---------------------------------------------------------------------------
@@ -160,24 +161,20 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
         by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
         if by_model:
             model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
-            entropy_vals.append(insights._shannon_entropy(model_counts))
+            entropy_vals.append(metrics_util.shannon_entropy(model_counts))
         sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
         if sessions:
             ordered = sorted(sessions, key=lambda s: s.get("start") or "")
             total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
             total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
             if total_hours > 0:
-                switch_count = 0
-                prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
-                for s in ordered[1:]:
-                    cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
-                    if cur_tool != prev_tool:
-                        switch_count += 1
-                    prev_tool = cur_tool
+                # 折序列 + 数相邻变化（共享实现；ordered 已排好序，重复排序结果不变）
+                switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(ordered))
                 switch_vals.append(switch_count / total_hours)
             shares = insights._project_shares(sessions)
             if shares:
-                hhi_vals.append(sum(s * s for s in shares))
+                # HHI 不逐次舍入（与 insights._hhi 口径不同）：先累加原始值，最后取均值再保留 4 位
+                hhi_vals.append(metrics_util.hhi(shares))
         ai_total = int(by_cat.get("AI编程", 0) or 0)
         total_active = int(agg.get("total_active_ms") or 0)
         adoption_vals.append(ai_total / total_active if total_active > 0 else 0.0)
@@ -382,24 +379,19 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
         by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
         if by_model:
             model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
-            entropy_delta.append(insights._shannon_entropy(model_counts))
+            entropy_delta.append(metrics_util.shannon_entropy(model_counts))
         sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
         if sessions:
             ordered = sorted(sessions, key=lambda s: s.get("start") or "")
             total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
             total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
             if total_hours > 0:
-                switch_count = 0
-                prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
-                for s in ordered[1:]:
-                    cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
-                    if cur_tool != prev_tool:
-                        switch_count += 1
-                    prev_tool = cur_tool
+                # 折序列 + 数相邻变化（共享实现，与 _aggregate_week 同构）
+                switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(ordered))
                 switch_delta.append(switch_count / total_hours)
             shares = insights._project_shares(sessions)
             if shares:
-                hhi_delta.append(sum(s * s for s in shares))
+                hhi_delta.append(metrics_util.hhi(shares))
         ai_total = int(by_cat.get("AI编程", 0) or 0)
         total_active = int(agg.get("total_active_ms") or 0)
         adoption_delta.append(ai_total / total_active if total_active > 0 else 0.0)
@@ -485,54 +477,59 @@ def growth_snapshot(data_root: str, config: dict, force: bool = False) -> dict:
     yesterday = _today() - datetime.timedelta(days=1)
     today = _today()
     today_week = _week_key(today)
-    groups: dict[str, list[str]] = {}
-    for day in _list_days(data_root):
-        dt = datetime.date.fromisoformat(day)
-        # 当前周只算到昨天止（避免当日半截数据抖动）；仅过滤与 today 同周且 > yesterday 的天，
-        # 未来周（如测试用 2099 年数据）在不同 ISO 周，不应被误过滤。
-        if dt > yesterday and _week_key(dt) == today_week:
-            continue
-        groups.setdefault(_week_key(dt), []).append(day)
+    # 批作用域（v2.9 性能修复，同 query.run_query 先例）：整段「分组 → 逐周聚合」
+    # 共享一次目录指纹/枚举，多周 × 多日的 collect 不再逐日全树扫盘，覆盖
+    # _aggregate_week（全量）与 _merge_incremental（增量）两条路径。git 子进程
+    # 调用的次数与位置不受影响（batch 只省指纹/枚举开销）。
+    with ai_sessions.collect_fingerprint_batch():
+        groups: dict[str, list[str]] = {}
+        for day in _list_days(data_root):
+            dt = datetime.date.fromisoformat(day)
+            # 当前周只算到昨天止（避免当日半截数据抖动）；仅过滤与 today 同周且 > yesterday 的天，
+            # 未来周（如测试用 2099 年数据）在不同 ISO 周，不应被误过滤。
+            if dt > yesterday and _week_key(dt) == today_week:
+                continue
+            groups.setdefault(_week_key(dt), []).append(day)
 
-    snap = _read_snapshot(data_root) or {}
-    stored = {}
-    for w in snap.get("weeks") or []:
-        if isinstance(w, dict) and w.get("week"):
-            stored[w["week"]] = w
+        snap = _read_snapshot(data_root) or {}
+        stored = {}
+        for w in snap.get("weeks") or []:
+            if isinstance(w, dict) and w.get("week"):
+                stored[w["week"]] = w
 
-    weeks: list[dict] = []
-    changed = bool(force)
-    min_days = max(1, cfg["min_days_per_week"])
-    for week_key in sorted(groups):
-        day_list = groups[week_key]
-        old = stored.get(week_key)
-        # 命中：周 key 相同且 _days 指纹一致且已满足最低天数 → 整条复用，跳过重算
-        if (not force and old and isinstance(old.get(_D_DAY), list)
-                and old[_D_DAY] == day_list and len(old[_D_DAY]) >= min_days):
-            weeks.append(old)
-            continue
-        # 增量：若新列表是旧指纹的超集（仅新增若干天），则只聚合新增天并合并，
-        # 以满足测试对“只重算新增天”的计数预期（env counts == len(delta)）。
-        if (not force and old and isinstance(old.get(_D_DAY), list)
-                and set(old[_D_DAY]).issubset(set(day_list))
-                and len(old[_D_DAY]) >= min_days
-                and len(day_list) > len(old[_D_DAY])
-                and len(day_list) >= min_days):
-            delta_days = [d for d in day_list if d not in old[_D_DAY]]
-            # 仅当 delta 均满足已存在且旧周已达标时走增量路径
-            if delta_days:
-                entry = _merge_incremental(old, delta_days, data_root, config)
-                if entry is not None:
-                    entry[_D_DAY] = list(day_list)
-                    weeks.append(entry)
-                    changed = True
-                    continue
-        entry = _aggregate_week(day_list, data_root, config)
-        if entry is None:  # 缺周（< min_days_per_week）→ 丢弃，不进 weeks
-            continue
-        entry[_D_DAY] = list(day_list)  # 内部指纹（不对外暴露）
-        weeks.append(entry)
-        changed = True
+        weeks: list[dict] = []
+        changed = bool(force)
+        min_days = max(1, cfg["min_days_per_week"])
+        for week_key in sorted(groups):
+            day_list = groups[week_key]
+            old = stored.get(week_key)
+            # 命中：周 key 相同且 _days 指纹一致且已满足最低天数 → 整条复用，跳过重算
+            if (not force and old and isinstance(old.get(_D_DAY), list)
+                    and old[_D_DAY] == day_list and len(old[_D_DAY]) >= min_days):
+                weeks.append(old)
+                continue
+            # 增量：若新列表是旧指纹的超集（仅新增若干天），则只聚合新增天并合并，
+            # 以满足测试对“只重算新增天”的计数预期（env counts == len(delta)）。
+            if (not force and old and isinstance(old.get(_D_DAY), list)
+                    and set(old[_D_DAY]).issubset(set(day_list))
+                    and len(old[_D_DAY]) >= min_days
+                    and len(day_list) > len(old[_D_DAY])
+                    and len(day_list) >= min_days):
+                delta_days = [d for d in day_list if d not in old[_D_DAY]]
+                # 仅当 delta 均满足已存在且旧周已达标时走增量路径
+                if delta_days:
+                    entry = _merge_incremental(old, delta_days, data_root, config)
+                    if entry is not None:
+                        entry[_D_DAY] = list(day_list)
+                        weeks.append(entry)
+                        changed = True
+                        continue
+            entry = _aggregate_week(day_list, data_root, config)
+            if entry is None:  # 缺周（< min_days_per_week）→ 丢弃，不进 weeks
+                continue
+            entry[_D_DAY] = list(day_list)  # 内部指纹（不对外暴露）
+            weeks.append(entry)
+            changed = True
 
     trend = _build_trend(weeks, cfg["flat_threshold"])
     payload = {"schema": _SCHEMA, "updated_at": _now_iso(),

@@ -148,6 +148,107 @@ def _load_config_for_root(root: str, config_path: str | None = None) -> dict:
     return classifier.load_config()
 
 
+def _log_warning(msg: str, *args) -> None:
+    """统一 warning 日志（applog 用法与 main() 一致；日志失败绝不影响响应）。"""
+    try:
+        import applog  # noqa: PLC0415
+        applog.get_logger("dashboard").warning(msg, *args)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# /api/heatmap 响应级 TTL 缓存：tokens=1 冷态要逐日跑 ai_sessions.collect（可达数十秒），
+# 且活跃 AI 会话会持续改动会话文件、打穿 collect 的文件指纹缓存——而热力图对秒级新鲜度
+# 无要求：TTL 内直接复用；过期先回旧值、后台线程静默刷新（stale-while-revalidate）。
+# 键含 root/config_path/days/tokens，容量上限防膨胀。
+_HEATMAP_TTL_S = 120.0
+# 无缓存时等待启动预热/后台刷新产出结果的上限（过了就自己算）
+_HEATMAP_WARM_WAIT_S = 120.0
+_HEATMAP_CACHE: dict = {}
+_HEATMAP_REFRESHING: dict = {}
+_HEATMAP_CACHE_LOCK = threading.Lock()
+
+
+def _heatmap_payload(root: str, config: dict, ai_sessions_mod, n: int,
+                     want_tokens: bool) -> list:
+    """构造 /api/heatmap 的 days 数组（最近 n 天；want_tokens 时逐日含 hourly_tokens）。
+
+    want_tokens 时逐日 ai_sessions.collect（冷态可达数十秒），因此每打完成一天
+    让出 GIL 片刻，避免冷态重算期间同服务的其他请求（概览各面板）被饿死。
+    """
+    def _rows():
+        rows = []
+        for d in _available_days(root)[-n:]:
+            # 单日聚合失败不拖垮热力图/总活跃（以 0 兜底，时间轴保持连续）
+            try:
+                agg = report.aggregate(d, root)
+                tokens_hourly = [0] * 24
+                if want_tokens and ai_sessions_mod is not None:
+                    total = (ai_sessions_mod.collect(d, config) or {}).get("total") or {}
+                    tokens_hourly = list(total.get("hourly_tokens") or [0] * 24)
+                rows.append({
+                    "date": d,
+                    "total_ms": agg["total_active_ms"],
+                    "hourly_ms": agg.get("hourly_ms", [0] * 24),
+                    "hourly_tokens": tokens_hourly,
+                })
+            except Exception:  # noqa: BLE001
+                rows.append({"date": d, "total_ms": 0, "hourly_ms": [0] * 24,
+                             "hourly_tokens": [0] * 24})
+            if want_tokens:
+                time.sleep(0.01)
+        return rows
+
+    if want_tokens and ai_sessions_mod is not None:
+        # 批作用域：整段循环共享一次目录指纹/枚举，多日 token 统计不重复扫盘
+        with ai_sessions_mod.collect_fingerprint_batch():
+            return _rows()
+    return _rows()
+
+
+# ---------------------------------------------------------------------------
+# 通用 GET 响应缓存（单日重端点共用）：TTL + stale-while-revalidate
+# ---------------------------------------------------------------------------
+# 语义与 /api/heatmap 的 _HEATMAP_CACHE 一致：TTL 内直接复用；命中过期项先回
+# 旧值、后台线程「单飞」刷新（刷新期间其他请求继续拿旧值，不堆积重算线程）。
+# 只缓存 200 成功响应：各 handler 的错误分支（400/500/降级空态）自行响应，不入缓存。
+# 键由调用方构造，必须含所有影响响应的变量（root/config_path + 该端点全部 query 参数）。
+_RESPONSE_CACHE_TTL_S = 60.0
+_RESPONSE_CACHE_MAX = 64          # 容量上限，超限按插入序淘汰最旧
+_RESPONSE_CACHE_WAIT_S = 30.0     # 保留参数：冷态等待现为单飞标记驱动（无固定上限），暂不参与控制
+_RESPONSE_CACHE: dict = {}        # key -> (ts, payload)
+_RESPONSE_CACHE_REFRESHING: dict = {}  # key -> True（单飞标记）
+_RESPONSE_CACHE_LOCK = threading.Lock()
+
+
+def invalidate_response_cache() -> None:
+    """清空通用响应缓存（测试用；数据被外部批量改动后也可主动调用）。"""
+    with _RESPONSE_CACHE_LOCK:
+        _RESPONSE_CACHE.clear()
+        _RESPONSE_CACHE_REFRESHING.clear()
+
+
+def _response_cache_store(key: tuple, payload: dict) -> None:
+    """写入缓存并按容量上限淘汰最旧（已存在 key 先 pop 再插 → LRU 而非 FIFO）。"""
+    with _RESPONSE_CACHE_LOCK:
+        _RESPONSE_CACHE.pop(key, None)  # 重写已存在的 key 沉到队尾：淘汰按「最近使用」而非「首次写入」
+        _RESPONSE_CACHE[key] = (time.time(), payload)
+        while len(_RESPONSE_CACHE) > _RESPONSE_CACHE_MAX:
+            _RESPONSE_CACHE.pop(next(iter(_RESPONSE_CACHE)))
+
+
+def _response_cache_refresh(key: tuple, compute: Callable[[], dict]) -> None:
+    """后台刷新一个已过期的缓存项（单飞标记已由调用方置位）。"""
+    try:
+        payload = compute()
+        _response_cache_store(key, payload)
+    except Exception:  # noqa: BLE001 —— 刷新失败保留旧值，等下次过期再试
+        pass
+    finally:
+        with _RESPONSE_CACHE_LOCK:
+            _RESPONSE_CACHE_REFRESHING.pop(key, None)
+
+
 def _config_file_for_root(root: str, config_path: str | None = None) -> str:
     """设置页保存 AI 配置时实际写入的 config.json 路径。"""
     if config_path:
@@ -488,9 +589,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def _valid_date(self, query: dict) -> str | None:
-        """校验并返回日期参数；非法返回 None。"""
+        """校验并返回日期参数；非法返回 None。
+
+        格式（YYYY-MM-DD）与语义（真实存在的日历日）双重校验：
+        形如 "2026-13-99" / "2026-02-30" 的格式合法但日历不存在的日期同样拒绝
+        （此前只查正则，垃圾日期会以空数据 200 通过，破坏 400 契约）。
+        """
         date = query.get("date", [""])[0]
-        return date if _DAY_RE.fullmatch(date) else None
+        if not _DAY_RE.fullmatch(date):
+            return None
+        try:
+            datetime.date.fromisoformat(date)
+        except ValueError:
+            return None
+        return date
 
     def _valid_month(self, query: dict) -> str | None:
         """校验并返回月份参数（YYYY-MM）；非法返回 None。"""
@@ -502,6 +614,62 @@ class Handler(BaseHTTPRequestHandler):
             return month
         except ValueError:
             return None
+
+    def _send_json_cached(self, key: tuple, compute: Callable[[], dict]) -> None:
+        """带 TTL+SWR 响应缓存的 200 JSON 响应（通用版，供单日重端点复用）。
+
+        - 命中（含过期）：立即回缓存值；已过期则触发后台单飞刷新
+          （stale-while-revalidate，刷新期间其他请求继续拿旧值）；
+        - 未命中（冷态）：同键已有计算在途则等其写缓存后直接回（单飞），
+          否则原子抢到单飞标记者才 compute——「查缓存 + 查标记 + 抢标记」
+          在同一临界区完成（CAS），并发请求绝不重复重算；
+        - compute() 返回要发送的 dict（须为成功 200 响应）；其抛出的异常原样
+          上抛，由调用方 except 分支自行响应——错误响应不入缓存。
+        """
+        start_refresh = False
+        with _RESPONSE_CACHE_LOCK:
+            hit = _RESPONSE_CACHE.get(key)
+            if hit is not None and time.time() - hit[0] >= _RESPONSE_CACHE_TTL_S:
+                payload = hit[1]
+                if not _RESPONSE_CACHE_REFRESHING.get(key):
+                    _RESPONSE_CACHE_REFRESHING[key] = True
+                    start_refresh = True
+            else:
+                payload = hit[1] if hit else None
+        if start_refresh:
+            threading.Thread(target=_response_cache_refresh, args=(key, compute),
+                             daemon=True, name="response-cache-refresh").start()
+        if payload is not None:
+            self._send_json(payload)
+            return
+
+        # 冷态：单飞等待。每轮在同一临界区内「查缓存 + 原子抢标记（CAS）」：
+        # 抢到空闲标记 → 由本请求 compute；抢不到（在途计算未完成，如 ai-compare
+        # 冷态 45s）→ 继续等其写缓存，绝不超时并行接管重算（在途者若异常退出，
+        # finally 释放标记后本请求自然接手兜底）。等待由标记驱动、无固定上限。
+        while True:
+            with _RESPONSE_CACHE_LOCK:
+                got = _RESPONSE_CACHE.get(key)
+                if got is None and not _RESPONSE_CACHE_REFRESHING.get(key):
+                    _RESPONSE_CACHE_REFRESHING[key] = True  # 原子抢标记（CAS）
+                    takeover = True
+                else:
+                    takeover = False
+            if got is not None:
+                self._send_json(got[1])
+                return
+            if takeover:
+                break
+            time.sleep(0.05)
+        try:
+            payload = compute()
+            # 先写缓存、后 pop 标记（对齐 _warm_heatmap 顺序）：标记在途期间
+            # 缓存已可见，并发请求拿到数据而不是再次抢到空标记重算
+            _response_cache_store(key, payload)
+        finally:
+            with _RESPONSE_CACHE_LOCK:
+                _RESPONSE_CACHE_REFRESHING.pop(key, None)
+        self._send_json(payload)
 
     def _required_token(self) -> str:
         """当前生效的访问口令；'' = 未开启。"""
@@ -664,7 +832,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _api_days(self, query: dict, root: str) -> None:
         """/api/days?n=14：最近 N 天总活跃与会话数（趋势图）。"""
-        n = max(1, min(90, int(query.get("n", ["14"])[0])))
+        try:
+            n = max(1, min(90, int(query.get("n", ["14"])[0])))
+        except ValueError:
+            n = 14
         days = _available_days(root)[-n:]
         out = []
         for d in days:
@@ -694,25 +865,82 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"date": date, "hourly_ms": agg.get("hourly_ms", [0] * 24)})
 
     def _api_heatmap(self, query: dict, root: str) -> None:
-        """/api/heatmap?days=84：最近 N 天每日总活跃 + 24 小时分布。"""
+        """/api/heatmap?days=84[&tokens=1]：最近 N 天每日总活跃 + 24 小时分布。
+
+        - 默认（趋势页口径）：只算窗口/前台聚合（days-cache，秒开）；
+        - tokens=1（概览 AI 编程热力图口径）：额外逐日 ai_sessions.collect，输出
+          hourly_tokens（全部已知 agent 工具 Token 用量小时分布，in+out 合计）。
+          冷态可达数十秒，结果带 _HEATMAP_TTL_S 响应级缓存（键含 root/config/days/tokens）。
+        """
         try:
             n = max(7, min(90, int(query.get("days", ["84"])[0])))
         except ValueError:
             n = 84
-        days = _available_days(root)[-n:]
-        out = []
-        for d in days:
-            # 单日聚合失败不拖垮热力图/总活跃（以 0 兜底，时间轴保持连续）
-            try:
-                agg = report.aggregate(d, root)
-                out.append({
-                    "date": d,
-                    "total_ms": agg["total_active_ms"],
-                    "hourly_ms": agg.get("hourly_ms", [0] * 24),
-                })
-            except Exception:  # noqa: BLE001
-                out.append({"date": d, "total_ms": 0, "hourly_ms": [0] * 24})
-        self._send_json({"days": out})
+        want_tokens = str(query.get("tokens", ["0"])[0]).lower() in ("1", "true", "yes")
+        cache_key = (root, getattr(self.server, "config_path", None), n, want_tokens)
+        config = _load_config_for_root(root, self.server.config_path)
+        try:
+            import ai_sessions  # noqa: PLC0415
+        except Exception:  # noqa: BLE001 —— ai_sessions 不可用时 token 维度全 0
+            ai_sessions = None
+
+        def _compute():
+            return _heatmap_payload(root, config, ai_sessions, n, want_tokens)
+
+        # 有缓存：立即返回（哪怕已过期——stale-while-revalidate），过期则后台静默刷新
+        with _HEATMAP_CACHE_LOCK:
+            hit = _HEATMAP_CACHE.get(cache_key)
+        if hit is not None:
+            self._send_json({"days": hit[1]})
+            if time.time() - hit[0] >= _HEATMAP_TTL_S:
+                with _HEATMAP_CACHE_LOCK:
+                    if _HEATMAP_REFRESHING.get(cache_key):
+                        return
+                    _HEATMAP_REFRESHING[cache_key] = True
+
+                def _bg_refresh():
+                    try:
+                        rows = _compute()
+                        with _HEATMAP_CACHE_LOCK:
+                            _HEATMAP_CACHE[cache_key] = (time.time(), rows)
+                            while len(_HEATMAP_CACHE) > 8:
+                                _HEATMAP_CACHE.pop(next(iter(_HEATMAP_CACHE)))
+                    except Exception:  # noqa: BLE001 —— 刷新失败保留旧值，等下次过期再试（同 _response_cache_refresh）
+                        pass
+                    finally:
+                        with _HEATMAP_CACHE_LOCK:
+                            _HEATMAP_REFRESHING.pop(cache_key, None)
+
+                threading.Thread(target=_bg_refresh, daemon=True,
+                                 name="heatmap-tokens-refresh").start()
+            return
+
+        # 无缓存：若启动预热/后台刷新已在算同一键，等它写缓存而不是再算一份
+        deadline = time.time() + _HEATMAP_WARM_WAIT_S
+        while True:
+            with _HEATMAP_CACHE_LOCK:
+                got = _HEATMAP_CACHE.get(cache_key)
+                refreshing = _HEATMAP_REFRESHING.get(cache_key)
+            if got is not None and (hit is None or got[0] > hit[0]):
+                rows = got[1]
+                break
+            if not refreshing or time.time() >= deadline:
+                with _HEATMAP_CACHE_LOCK:
+                    _HEATMAP_REFRESHING[cache_key] = True
+                try:
+                    rows = _compute()
+                    # 先写缓存、后 pop 标记（对齐 _warm_heatmap 顺序）：标记在途期间
+                    # 缓存已可见，并发等待者拿到数据而不是再次抢到空标记重算
+                    with _HEATMAP_CACHE_LOCK:
+                        _HEATMAP_CACHE[cache_key] = (time.time(), rows)
+                        while len(_HEATMAP_CACHE) > 8:
+                            _HEATMAP_CACHE.pop(next(iter(_HEATMAP_CACHE)))
+                finally:
+                    with _HEATMAP_CACHE_LOCK:
+                        _HEATMAP_REFRESHING.pop(cache_key, None)
+                break
+            time.sleep(0.5)
+        self._send_json({"days": rows})
 
     # ------------------------------------------------------------------
     # 报表（日报 / 周报 / 月报 / 导出 / 备份）
@@ -785,13 +1013,19 @@ class Handler(BaseHTTPRequestHandler):
     # AI 会话深度 / 时间轴 / 成长 / 对比 / 查询 / 预算
     # ------------------------------------------------------------------
     def _api_ai_sessions(self, query: dict, root: str) -> None:
-        """/api/ai-sessions?date=：AI 会话深度统计（本地会话文件 + Web AI 会话）。"""
+        """/api/ai-sessions?date=：AI 会话深度统计（本地会话文件 + Web AI 会话）。
+
+        单日重端点（浏览器库解析 + 会话指纹遍历）：TTL+SWR 响应缓存（键含 date）。
+        """
         date = self._valid_date(query)
         if not date:
             self._send_json({"error": "invalid date"}, 400)
             return
         config = _load_config_for_root(root, self.server.config_path)
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None),
+                     "ai-sessions", date)
+
+        def _compute():
             import ai_sessions  # noqa: PLC0415
             web_visits = None
             try:
@@ -801,14 +1035,19 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:  # noqa: BLE001 —— Web 解析失败不影响本地统计
                 web_visits = None
             data = ai_sessions.collect(date, config, web_visits=web_visits)
-            self._send_json({"date": date, "ai_sessions": data})
+            return {"date": date, "ai_sessions": data}
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except Exception as exc:  # noqa: BLE001 —— 会话深度失败不拖垮概览
+            _log_warning("ai-sessions 端点不可用 (root=%s date=%s): %s", root, date, exc)
             self._send_json({"error": f"ai-sessions unavailable: {exc}"}, 500)
 
     def _api_timeline(self, query: dict, root: str) -> None:
         """/api/timeline?date=：Vibe 时间轴回放（v2.5）三源合并。
 
         纯派生、best-effort：无数据返回 200 空态；缓存复用 report._agg_cache。
+        单日重端点：TTL+SWR 响应缓存（键含 date 与 project——project 影响结果）。
         """
         date = self._valid_date(query)
         if not date:
@@ -816,11 +1055,17 @@ class Handler(BaseHTTPRequestHandler):
             return
         project = (query.get("project") or [None])[0] or None
         config = _load_config_for_root(root, self.server.config_path)
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None),
+                     "timeline", date, project)
+
+        def _compute():
             import timeline  # noqa: PLC0415 —— 惰性导入，失败只影响本端点
             data = timeline.build_timeline(date, root, config, project=project)
-            self._send_json({"date": date, "events": data.get("events") or [],
-                             "summary": data.get("summary") or {}})
+            return {"date": date, "events": data.get("events") or [],
+                    "summary": data.get("summary") or {}}
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except Exception as exc:  # noqa: BLE001 —— 时间轴失败不拖垮仪表盘
             self._send_json({"error": f"timeline unavailable: {exc}"}, 500)
 
@@ -853,6 +1098,8 @@ class Handler(BaseHTTPRequestHandler):
 
         start/end 必填且全匹配 YYYY-MM-DD；end<start 或范围非 1..90 天 → 400；
         project 可选模糊过滤；无数据 → 200 空态；内部异常降级 500 不拖垮仪表盘。
+        区间重端点（逐日 collect 聚合）：TTL+SWR 响应缓存（键含 start/end/project，
+        同 _api_urls 先例）；400/500 错误分支直接响应，不入缓存。
         """
         start = (query.get("start") or [""])[0]
         end = (query.get("end") or [""])[0]
@@ -869,13 +1116,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "invalid range"}, 400)
             return
         project = (query.get("project") or [None])[0] or None
-        config = _load_config_for_root(root, self.server.config_path)
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None),
+                     "ai-compare", start, end, project)
+
+        def _compute():
+            # 与其他端点一致：按 data_root/--config 取配置（而非全局默认路径）
+            config = _load_config_for_root(root, self.server.config_path)
             import tool_compare  # noqa: PLC0415 —— 惰性导入，失败只影响本端点
             days = [(d0 + datetime.timedelta(days=i)).isoformat()
                     for i in range((d1 - d0).days + 1)]
-            data = tool_compare.compare_tools(days, root, config, project=project)
-            self._send_json(data)
+            return tool_compare.compare_tools(days, root, config, project=project)
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except ValueError:
             self._send_json({"error": "invalid range"}, 400)
         except Exception as exc:  # noqa: BLE001 —— 对比失败不拖垮仪表盘
@@ -951,13 +1204,20 @@ class Handler(BaseHTTPRequestHandler):
     # 洞察（规则 / AI / 行为 / 人格 / 设置 / Ollama）
     # ------------------------------------------------------------------
     def _api_insights(self, query: dict, root: str) -> None:
-        """/api/insights?date=：规则即时计算（离线）；AI 只读缓存（成功才写缓存）。"""
+        """/api/insights?date=：规则即时计算（离线）；AI 只读缓存（成功才写缓存）。
+
+        单日重端点（规则/基线/行为画像/Git 子进程/AI 会话质量多路计算）：
+        TTL+SWR 响应缓存（键含 date）。
+        """
         date = self._valid_date(query)
         if not date:
             self._send_json({"error": "invalid date"}, 400)
             return
         config = _load_config_for_root(root, self.server.config_path)
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None),
+                     "insights", date)
+
+        def _compute():
             import insights  # noqa: PLC0415 —— 惰性导入
             prev_day = (datetime.date.fromisoformat(date)
                         - datetime.timedelta(days=1)).isoformat()
@@ -989,7 +1249,7 @@ class Handler(BaseHTTPRequestHandler):
                     _ai_mod.collect(date, config))
             except Exception:  # noqa: BLE001
                 ai_quality = []
-            self._send_json({
+            return {
                 "date": date, "rules": rules,
                 "ai_enabled": ai_enabled, "ai": ai,
                 "behavior": behavior,
@@ -997,7 +1257,10 @@ class Handler(BaseHTTPRequestHandler):
                 "time_saved": time_saved,
                 "git": git,
                 "ai_quality": ai_quality,
-            })
+            }
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except Exception as exc:  # noqa: BLE001 —— 洞察失败不拖垮仪表盘
             self._send_json({"error": f"insights unavailable: {exc}"}, 500)
 
@@ -1007,15 +1270,22 @@ class Handler(BaseHTTPRequestHandler):
         数据来自 adoption.py（仅 Git 侧粗代理：retention = 新增/(新增+删除)，
         reworked_ratio = modify_ratio），绝不掺 AI 会话时间窗归因，永远不给
         confidence=high。任何单源失败 → 契约空态 200 可展示，绝不 500。
+        单日重端点（Git 子进程）：TTL+SWR 响应缓存（键含 date）；降级空态不入缓存。
         """
         date = self._valid_date(query)
         if not date:
             self._send_json({"error": "invalid date"}, 400)
             return
         config = _load_config_for_root(root, self.server.config_path)
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None),
+                     "adoption", date)
+
+        def _compute():
             import adoption  # noqa: PLC0415 —— 惰性导入，失败不拖垮仪表盘
-            result = adoption.adoption_stats(date, root, config)
+            return adoption.adoption_stats(date, root, config)
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except Exception as exc:  # noqa: BLE001 —— 代理指标异常 → 契约空态，绝不 500
             result = {
                 "date": date,
@@ -1028,7 +1298,7 @@ class Handler(BaseHTTPRequestHandler):
                             "retention": None, "reworked_ratio": None},
                 "projects": [],
             }
-        self._send_json(result)
+            self._send_json(result)
 
     def _api_insights_settings(self, query: dict, root: str) -> None:
         """/api/insights/settings：AI 设置视图（开关 + provider 预设 + 自定义端点）。"""
@@ -1122,6 +1392,7 @@ class Handler(BaseHTTPRequestHandler):
         """/api/pricing：内置模型定价 + 用户 <root>/ai_pricing.json 覆盖。"""
         try:
             import ai_sessions  # noqa: PLC0415
+            import tool_registry  # noqa: PLC0415
             builtin = dict(ai_sessions._DEFAULT_PRICING)
             custom: dict = {}
             fp = os.path.join(root, "ai_pricing.json")
@@ -1135,8 +1406,12 @@ class Handler(BaseHTTPRequestHandler):
                     custom = {}
             self._send_json({
                 "builtin_count": len(builtin),
-                "builtin": {k: list(v) for k, v in sorted(builtin.items())},
+                # 表值 2/4 元组混存，统一归一化为 4 元素（in/out/cache读/cache写）
+                "builtin": {k: list(ai_sessions._price4(v)) for k, v in sorted(builtin.items())},
                 "custom": custom,
+                # 模型前缀 → 厂商（additive，供前端价格分组/展示厂商徽标；
+                # 与前端 PRICE_VENDORS 同源，以 tool_registry 为唯一事实源）
+                "model_vendors": dict(tool_registry.MODEL_VENDOR_PREFIXES),
             })
         except Exception as exc:  # noqa: BLE001
             self._send_json({"error": f"pricing read failed: {exc}"}, 500)
@@ -1186,25 +1461,33 @@ class Handler(BaseHTTPRequestHandler):
     # 浏览器明细 / 日志 / 分组
     # ------------------------------------------------------------------
     def _api_urls(self, query: dict, root: str) -> None:
-        """/api/urls?date=：浏览器 URL 明细（最多 _URL_MAX_ROWS 条）。"""
+        """/api/urls?date=：浏览器 URL 明细（最多 _URL_MAX_ROWS 条）。
+
+        单日重端点（浏览器库解析）：TTL+SWR 响应缓存（键含 date）；
+        解析失败的降级空态走 except 分支直接响应，不入缓存。
+        """
         date = self._valid_date(query)
         if not date:
             self._send_json({"error": "invalid date"}, 400)
             return
-        try:
+        cache_key = (root, getattr(self.server, "config_path", None), "urls", date)
+
+        def _compute():
             import browser_history  # noqa: PLC0415 —— 惰性导入
             # 与其他端点一致：按 data_root/--config 取配置（而非全局默认路径）
             config = _load_config_for_root(root, self.server.config_path)
             data = browser_history.collect(date, root, config)
-            visits = data.get("visits", [])[:_URL_MAX_ROWS]
-            self._send_json({
+            return {
                 "date": date,
                 "count": data.get("count", 0),
                 "total_duration_s": data.get("total_duration_s", 0),
                 "by_category_duration_s": data.get("by_category_duration_s", {}),
                 "by_domain_duration_s": data.get("by_domain_duration_s", {}),
-                "visits": visits,
-            })
+                "visits": data.get("visits", [])[:_URL_MAX_ROWS],
+            }
+
+        try:
+            self._send_json_cached(cache_key, _compute)
         except Exception:  # noqa: BLE001 —— 浏览器数据失败不影响页面其他部分
             self._send_json({"date": date, "count": 0, "total_duration_s": 0,
                              "by_category_duration_s": {}, "by_domain_duration_s": {}, "visits": []})
@@ -1227,8 +1510,9 @@ class Handler(BaseHTTPRequestHandler):
     def _api_groups(self, query: dict, root: str) -> None:
         """/api/groups：内置+自定义分组、全部已知应用及其当前分类。"""
         try:
+            # 与其他端点一致：按 data_root/--config 取配置（而非全局默认路径）
+            config = _load_config_for_root(root, self.server.config_path)
             import classifier as _clf  # noqa: PLC0415
-            config = _clf.load_config()
             config["data_root"] = root
             groups = _clf.load_app_groups(root)
             groups = _clf.sanitize_groups(config, groups)  # 剔除孤儿分组（如遗留的 AI工具）
@@ -1736,6 +2020,26 @@ def main(argv: list[str] | None = None) -> int:
             webbrowser.open(url)
         except Exception:  # noqa: BLE001
             pass
+
+    def _warm_heatmap():
+        """后台预热概览 Token 热力图（冷态逐日 collect 可达数十秒）：首开概览即秒出。"""
+        try:
+            import ai_sessions  # noqa: PLC0415
+            config = _load_config_for_root(data_root, args.config)
+            key = (data_root, args.config, 28, True)
+            with _HEATMAP_CACHE_LOCK:
+                _HEATMAP_REFRESHING[key] = True
+            try:
+                rows = _heatmap_payload(data_root, config, ai_sessions, 28, True)
+                with _HEATMAP_CACHE_LOCK:
+                    _HEATMAP_CACHE[key] = (time.time(), rows)
+            finally:
+                with _HEATMAP_CACHE_LOCK:
+                    _HEATMAP_REFRESHING.pop(key, None)
+        except Exception:  # noqa: BLE001 —— 预热失败不影响服务
+            pass
+
+    threading.Thread(target=_warm_heatmap, daemon=True, name="heatmap-warmup").start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

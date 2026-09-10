@@ -32,13 +32,13 @@ def test_weighted_estimator_buckets():
 def test_message_usage_nested_and_flat():
     # 嵌套 usage（Claude Code 风格）
     m1 = {"usage": {"input_tokens": 15000, "output_tokens": 500}}
-    assert ai_sessions._message_usage(m1) == (15000, 500)
+    assert ai_sessions._message_usage(m1) == (15000, 500, 0, 0)
     # prompt/completion 命名（OpenAI 风格）
     m2 = {"usage": {"prompt_tokens": 100, "completion_tokens": 20}}
-    assert ai_sessions._message_usage(m2) == (100, 20)
+    assert ai_sessions._message_usage(m2) == (100, 20, 0, 0)
     # 平铺字段
     m3 = {"tokens_in": 7, "tokens_out": 3}
-    assert ai_sessions._message_usage(m3) == (7, 3)
+    assert ai_sessions._message_usage(m3) == (7, 3, 0, 0)
     # 缺失 → None；负值/非数值被忽略
     assert ai_sessions._message_usage({"role": "user", "content": "hi"}) is None
     assert ai_sessions._message_usage({"usage": {"input_tokens": -5}}) is None
@@ -138,7 +138,7 @@ def test_pi_parse_preserves_message_usage(tmp_path):
     assert len(msgs) == 1
     assert msgs[0]["usage"] == {"input": 8064, "output": 182}
     assert msgs[0]["model"] == "step-3.7-flash"  # 每消息 model 优先
-    assert ai_sessions._message_usage(msgs[0]) == (8064, 182)
+    assert ai_sessions._message_usage(msgs[0]) == (8064, 182, 0, 0)
     print("  [PASS] pi_parse_preserves_message_usage")
 
 

@@ -41,7 +41,7 @@ _ALIASES_LOCK = threading.Lock()
 # aggregate() 结果 LRU 缓存：dashboard 14 天趋势 / 月报 31 天 / 周报都会重复全量
 # 解析 usage.jsonl，缓存后同一天只解析一次。
 # value = (mtime, size, data)；文件 mtime/size 变化即失效（append 写会更新 mtime）。
-_AGG_CACHE_MAX = 16
+_AGG_CACHE_MAX = 128  # ≥ 84 天热力图/月报区间：逐日聚合互不驱逐（旧值 16 时 LRU 互相挤掉，形同虚设）
 _agg_cache: "OrderedDict[tuple, tuple]" = OrderedDict()
 # 并发安全（dashboard 为 ThreadingHTTPServer）：LRU 命中 move_to_end 与插入端
 # popitem 驱逐在多线程下会互相踩踏（脏读 / OrderedDict mutated during iteration）。
@@ -433,8 +433,11 @@ def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = Non
             return None
 
         out: list[str] = ["## AI 会话深度", ""]
+        # 有真实 usage（含缓存）时不再称「估算」；仅估算时保留原措辞
+        real_usage = int(total.get("tokens_from_usage") or 0) > 0
+        tok_label = "真实 usage（含缓存）" if real_usage else "Token 估算"
         out.append(f"- 本地会话：消息 {total.get('turns', 0)} 条 / 对话轮次 {total.get('rounds', 0)} 轮，"
-                   f"Token 估算 进 {total.get('tokens_in', 0)} / 出 {total.get('tokens_out', 0)}，"
+                   f"{tok_label} 进 {total.get('tokens_in', 0)} / 出 {total.get('tokens_out', 0)}，"
                    f"成本估算 {ai_sessions._fmt_cost(total.get('cost_total', 0))}")
         qs = total.get("quality_summary") or {}
         if qs.get("sessions_scored"):
@@ -483,7 +486,9 @@ def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = Non
             ] for s in web["sessions"][: (max_rows or 10)]]
             out.append(_md_table(["Web 工具", "会话 ID", "标题", "访问次数"], rows))
             out.append("")
-        out.append("注：Token 为长度折算的估算值；成本为按模型定价表（USD/百万 Token）的估算，"
+        tok_note = ("Token 优先取会话内真实 usage（含缓存），无 usage 的消息按长度折算估算"
+                    if real_usage else "Token 为长度折算的估算值")
+        out.append(f"注：{tok_note}；成本为按模型定价表（USD/百万 Token）的估算，"
                    "可用 config 的 ai_sessions.costs.model_pricing 自定义单价；对话轮次为消息序列中 "
                    "user→assistant 陪对数；质量分为消息长度/轮次/配比启发式估算（非真实采纳率）；"
                    "Web 会话访问次数为浏览器侧轮次的近似。所有解析均在本地完成，不上传任何数据。")

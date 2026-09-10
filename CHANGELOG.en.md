@@ -8,6 +8,27 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [2.9.4] - 2026-09-10
+
+> Theme: internal framework unification (tool_registry single source of truth + metrics_util shared stat helpers) + dashboard response-cache framework (TTL + stale-while-revalidate single-flight) + frontend robustness (error banner / date-change race protection / non-blocking loads) + AI coding heatmap (overview).
+
+### Added
+- **AI coding heatmap (overview)**: new 28-day x 24-hour heatmap showing token usage (in+out) across all known agent tools; background warm-up on server start, TTL response cache (120s + stale-while-revalidate) makes it near-instant
+- **tool_registry.py (single source of truth)**: the default dirs / dedicated parsers / cache exemptions / fingerprint specials / web domains / aliases of 21 local + 4 web-only AI tools are now one ToolSpec per tool; consumed by ai_sessions / query / tool_compare / dashboard; adding a tool touches exactly one place (docs/HARNESSES.md ships an adapter checklist). The model-to-vendor map (MODEL_VENDOR_PREFIXES) is shipped to the frontend via /api/pricing; the local fallback table is degradation-only
+- **metrics_util.py (shared stat helpers)**: fmt_usd / shannon_entropy / hhi / count_switches / tool_switch_series / merge_dim consolidated; budget / growth / insights / tool_compare / ai_sessions now share one implementation (entropy/HHI rounding-precision differences are handled by each caller)
+- **Dashboard response-cache framework**: heavy single-day / range endpoints now share TTL (60s) + stale-while-revalidate + single-flight (CAS) caching: urls / ai-sessions / timeline / ai-compare / insights / heatmap; concurrent cold requests never recompute in parallel (8-way concurrency computes once), error responses never enter the cache
+- **Report wording**: tokens backed by real usage (incl. cache) are no longer labelled "estimated"
+
+### Fixed
+- **Semantically invalid dates pierced the 400 contract**: _valid_date only checked the YYYY-MM-DD shape, so calendar-impossible dates like "2026-13-99" / "2026-02-30" passed with an empty 200 (a v1-era leftover; _valid_month and ai-compare already had semantic checks). Added fromisoformat semantic validation; all 14 single-day endpoints (ai-sessions / insights / timeline / budget, ...) benefit
+- **Frontend robustness**: failed view loads no longer wipe the DOM (error banner + retry button, state.loaded reset); stale responses from a previous day are discarded (date-stamp guards against slow responses overwriting newer panels); overview browser-dwell / ai-sessions / budget loads are now non-blocking; localDateStr replaces toISOString (no more UTC roll-back at local midnight, UTC+8)
+- **/api/days?n=abc falls back to 14**: invalid n no longer 500s (B1 regression pin)
+- **config.json line-ending noise**: an accidental CRLF conversion in the working tree was restored to LF (zero content diff)
+
+### Tests (2.9.4)
+- New response-cache contract tests (SWR stale-hit / background refresh / error-not-cached / 8-way concurrent single-flight), semantic-date 400, frontend wiring expansion, token-cache fixes, tool_registry resolution
+- Full regression 730 passed, 0 failed
+
 ## [2.9.3] - 2026-08-31
 
 > Theme: vibe coding metric corrections (three growth metrics revived + two fake-data insights) + new ZCode / Codex session deep-stats adapters + DSH zstd session support (backfill of previously uncommitted working-tree changes).

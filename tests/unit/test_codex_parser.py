@@ -74,8 +74,9 @@ def test_parse_codex_basic(tmp_path):
     msgs = ai_sessions._parse_codex_file(path)
     assert len(msgs) == 3, f"user+2 assistant 应 3 条（developer 跳过），实际 {len(msgs)}"
     assert [m["role"] for m in msgs] == ["user", "assistant", "assistant"]
-    # 模型：assistant 来自 turn_context 回填；user 无模型 → 未识别
-    assert msgs[0]["model"] == "未识别"
+    # 模型：assistant 与 user 均来自 turn_context 回填（user 也回填，消除
+    # 「未识别」零费用桶——Phase 1+2 起估算 token 也按真实单价计成本）
+    assert msgs[0]["model"] == "deepseek-v4-flash"
     assert msgs[1]["model"] == "deepseek-v4-flash"
     assert msgs[2]["model"] == "deepseek-v4-flash"
     # UTC → 本地：本地时区下当日时刻，前缀必为查询日
@@ -91,8 +92,8 @@ def test_parse_codex_usage_attribution(tmp_path):
     assts = [m for m in msgs if m["role"] == "assistant"]
     assert assts[0]["usage"] == {"input_tokens": 100, "output_tokens": 10}
     assert assts[1]["usage"] == {"input_tokens": 50, "output_tokens": 5}
-    # _message_usage 能读归一化结果
-    assert ai_sessions._message_usage(assts[0]) == (100, 10)
+    # _message_usage 能读归一化结果（Phase 1+2 起返回互斥 4 元组，无缓存记 0）
+    assert ai_sessions._message_usage(assts[0]) == (100, 10, 0, 0)
 
 
 def test_collect_codex(tmp_path):

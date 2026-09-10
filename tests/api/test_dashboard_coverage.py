@@ -144,6 +144,24 @@ def test_pricing_roundtrip(api_server):
     print("  [PASS] pricing_roundtrip")
 
 
+def test_pricing_builtin_normalized_four_elements(api_server):
+    """GET /api/pricing 的 builtin 每个值都是 4 元素列表（in/out/缓存读/缓存写）。
+
+    内置表 2/4 元组混存，端点统一经 ai_sessions._price4 归一化后输出，
+    前端设置页才能按固定 4 列渲染缓存价格。
+    """
+    client, _root = api_server
+    s, d, _ = client.get("/api/pricing")
+    assert s == 200
+    assert d["builtin_count"] == len(d["builtin"])
+    assert all(isinstance(v, list) and len(v) == 4 for v in d["builtin"].values())
+    # 2 元组表值（gpt-4o）→ 补 (in, in)：[2.5, 10, 2.5, 10]
+    assert d["builtin"]["gpt-4o"] == [2.5, 10.0, 2.5, 2.5]
+    # 显式 4 元组表值（claude-opus-5）→ 按档原样
+    assert d["builtin"]["claude-opus-5"] == [5.0, 25.0, 0.5, 6.25]
+    print("  [PASS] pricing_builtin_normalized_four_elements")
+
+
 def test_ai_module_save_import_export(api_server):
     """AI 客制化模块：保存 → 读取 → 导入 → 导出 blob。"""
     client, root = api_server

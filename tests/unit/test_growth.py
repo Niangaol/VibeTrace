@@ -298,7 +298,10 @@ class TestAggregateWeek:
 
     def test_modify_ratio_reverse_good_dir(self, tmp_path, monkeypatch):
         """modify_ratio 降幅 → trend 条目 dir=down 且 good_dir=true（反向指标）。"""
-        w1, w2 = _week_days(2026, 37, 4), _week_days(2026, 38, 4)
+        # 用 2099 年造数（同文件其他用例惯例）：远未来周不会被 growth_snapshot
+        # 「当前周只算到昨天」过滤误伤——硬编码真实年份周号会撞日历（如 2026-W37
+        # 在 2026-09-07 起成为当前周，整周数据被过滤导致用例失败）。
+        w1, w2 = _week_days(2099, 37, 4), _week_days(2099, 38, 4)
         env = _env()
         for d in w1 + w2:
             env["focus"][d] = 50
@@ -312,7 +315,7 @@ class TestAggregateWeek:
         _mk_dirs(root, w1 + w2)
         result = growth.growth_snapshot(root, _cfg())
         assert result["source"] == "fresh"
-        assert [w["week"] for w in result["weeks"]] == ["2026-W37", "2026-W38"]
+        assert [w["week"] for w in result["weeks"]] == ["2099-W37", "2099-W38"]
         mr = [t for t in result["trend"] if t["metric"] == "modify_ratio"][0]
         assert mr["dir"] == "down"
         assert mr["good_dir"] is True

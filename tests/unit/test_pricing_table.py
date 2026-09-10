@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""tests/unit/test_pricing_table.py — 定价表查询测试（50+ case，精确匹配 + 子串 fallback）。"""
+"""tests/unit/test_pricing_table.py — 定价表查询测试（50+ case，精确匹配 + 子串 fallback）。
+
+Phase 1+2 起 _model_price 统一返回四元组 (in, out, cache_read, cache_write)：
+2 元组表值自动补 (in, in)（未配缓存档按输入价计，保守高估）；未命中 (0,0,0,0)。
+内置 claude/deepseek/gpt-5.x/codex 系为显式 4 元组缓存档。
+"""
 
 from __future__ import annotations
 
@@ -19,9 +24,9 @@ import ai_sessions  # noqa: E402
 # ---------------------------------------------------------------------------
 def test_model_price_exact_match():
     table = {"gpt-4o": (5.0, 15.0), "claude-3-5-sonnet": (3.0, 15.0), "deepseek-r1": (1.0, 2.0)}
-    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0)
-    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0)
-    assert ai_sessions._model_price(table, "deepseek-r1") == (1.0, 2.0)
+    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0, 3.0, 3.0)
+    assert ai_sessions._model_price(table, "deepseek-r1") == (1.0, 2.0, 1.0, 1.0)
     print("  [PASS] exact_match")
 
 
@@ -30,9 +35,9 @@ def test_model_price_exact_match():
 # ---------------------------------------------------------------------------
 def test_model_price_substring_fallback():
     table = {"gpt-4o": (5.0, 15.0), "gpt-4": (30.0, 60.0), "claude": (3.0, 15.0)}
-    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 15.0)
-    assert ai_sessions._model_price(table, "gpt-4-turbo") == (30.0, 60.0)
-    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0)
+    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 15.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "gpt-4-turbo") == (30.0, 60.0, 30.0, 30.0)
+    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0, 3.0, 3.0)
     print("  [PASS] substring_fallback")
 
 
@@ -41,9 +46,9 @@ def test_model_price_substring_fallback():
 # ---------------------------------------------------------------------------
 def test_model_price_case_insensitive():
     table = {"gpt-4o": (5.0, 15.0)}
-    assert ai_sessions._model_price(table, "GPT-4o") == (5.0, 15.0)
-    assert ai_sessions._model_price(table, "Gpt-4o") == (5.0, 15.0)
-    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0)
+    assert ai_sessions._model_price(table, "GPT-4o") == (5.0, 15.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "Gpt-4o") == (5.0, 15.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0, 5.0, 5.0)
     print("  [PASS] case_insensitive")
 
 
@@ -52,10 +57,10 @@ def test_model_price_case_insensitive():
 # ---------------------------------------------------------------------------
 def test_model_price_miss():
     table = {"gpt-4o": (5.0, 15.0)}
-    assert ai_sessions._model_price(table, "unknown-model") == (0.0, 0.0)
-    assert ai_sessions._model_price(table, "") == (0.0, 0.0)
+    assert ai_sessions._model_price(table, "unknown-model") == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._model_price(table, "") == (0.0, 0.0, 0.0, 0.0)
     # gpt-4o-unknown 包含 gpt-4o，故命中
-    assert ai_sessions._model_price(table, "gpt-4o-unknown") == (5.0, 15.0)
+    assert ai_sessions._model_price(table, "gpt-4o-unknown") == (5.0, 15.0, 5.0, 5.0)
     print("  [PASS] miss")
 
 
@@ -180,10 +185,10 @@ def test_pricing_table_corrupt_file(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_builtin_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "gpt-4o") == (2.5, 10.0)
-    assert ai_sessions._model_price(table, "gpt-4o-mini") == (0.15, 0.6)
-    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0)
-    assert ai_sessions._model_price(table, "gemini-2.5-pro") == (1.25, 10.0)
+    assert ai_sessions._model_price(table, "gpt-4o") == (2.5, 10.0, 2.5, 2.5)
+    assert ai_sessions._model_price(table, "gpt-4o-mini") == (0.15, 0.6, 0.15, 0.15)
+    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0, 0.3, 3.75)
+    assert ai_sessions._model_price(table, "gemini-2.5-pro") == (1.25, 10.0, 1.25, 1.25)
     print("  [PASS] builtin_substring")
 
 
@@ -192,7 +197,7 @@ def test_model_price_builtin_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_newer_key_wins():
     table = {"gpt": (1.0, 2.0), "gpt-4o": (3.0, 12.0)}
-    assert ai_sessions._model_price(table, "gpt-4o-mini") == (3.0, 12.0)
+    assert ai_sessions._model_price(table, "gpt-4o-mini") == (3.0, 12.0, 3.0, 3.0)
     print("  [PASS] newer_key_wins")
 
 
@@ -248,8 +253,8 @@ def test_pricing_table_priority_chain(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_partial_miss():
     table = {"gpt-4o": (5.0, 15.0), "claude-3-5-sonnet": (3.0, 15.0)}
-    assert ai_sessions._model_price(table, "gpt-4") == (0.0, 0.0)
-    assert ai_sessions._model_price(table, "gpt-3.5") == (0.0, 0.0)
+    assert ai_sessions._model_price(table, "gpt-4") == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._model_price(table, "gpt-3.5") == (0.0, 0.0, 0.0, 0.0)
     print("  [PASS] partial_miss")
 
 
@@ -258,9 +263,9 @@ def test_model_price_partial_miss():
 # ---------------------------------------------------------------------------
 def test_model_price_none_empty():
     table = {"gpt-4o": (5.0, 15.0)}
-    assert ai_sessions._model_price(table, None) == (0.0, 0.0)
-    assert ai_sessions._model_price(table, "") == (0.0, 0.0)
-    assert ai_sessions._model_price({}, "gpt-4o") == (0.0, 0.0)
+    assert ai_sessions._model_price(table, None) == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._model_price(table, "") == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._model_price({}, "gpt-4o") == (0.0, 0.0, 0.0, 0.0)
     print("  [PASS] none_empty")
 
 
@@ -333,9 +338,9 @@ def test_pricing_file_empty_root():
 # ---------------------------------------------------------------------------
 def test_model_price_deepseek_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "deepseek-chat") == (0.27, 1.1)
-    assert ai_sessions._model_price(table, "deepseek-r1") == (0.55, 2.19)
-    assert ai_sessions._model_price(table, "deepseek-v3") == (0.27, 1.1)
+    assert ai_sessions._model_price(table, "deepseek-chat") == (0.257, 1.029, 0.0257, 0.257)
+    assert ai_sessions._model_price(table, "deepseek-r1") == (0.7, 2.5, 0.07, 0.7)
+    assert ai_sessions._model_price(table, "deepseek-v3") == (0.27, 1.1, 0.027, 0.27)
     print("  [PASS] deepseek_substring")
 
 
@@ -344,9 +349,9 @@ def test_model_price_deepseek_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_gemini_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "gemini-2.5-pro") == (1.25, 10.0)
-    assert ai_sessions._model_price(table, "gemini-2.5-flash") == (0.3, 2.5)
-    assert ai_sessions._model_price(table, "gemini-3-flash") == (0.5, 3.0)
+    assert ai_sessions._model_price(table, "gemini-2.5-pro") == (1.25, 10.0, 1.25, 1.25)
+    assert ai_sessions._model_price(table, "gemini-2.5-flash") == (0.3, 2.5, 0.3, 0.3)
+    assert ai_sessions._model_price(table, "gemini-3-flash") == (0.5, 3.0, 0.5, 0.5)
     print("  [PASS] gemini_substring")
 
 
@@ -355,9 +360,9 @@ def test_model_price_gemini_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_qwen_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4)
-    assert ai_sessions._model_price(table, "qwen-plus") == (0.8, 2.0)
-    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6)
+    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 1.6, 1.6)
+    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.26, 0.26)
+    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.3, 0.3)
     print("  [PASS] qwen_substring")
 
 
@@ -366,9 +371,10 @@ def test_model_price_qwen_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_glm_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "glm-5") == (0.85, 3.4)
-    assert ai_sessions._model_price(table, "glm-4") == (0.5, 1.4)
-    assert ai_sessions._model_price(table, "glm-5.2") == (0.85, 3.4)
+    assert ai_sessions._model_price(table, "glm-5") == (0.6, 1.92, 0.6, 0.6)
+    assert ai_sessions._model_price(table, "glm-4") == (0.5, 1.4, 0.5, 0.5)
+    assert ai_sessions._model_price(table, "glm-5.3-flash") == (0.075, 0.25, 0.075, 0.075)
+    assert ai_sessions._model_price(table, "glm-5.2") == (0.966, 3.036, 0.966, 0.966)
     print("  [PASS] glm_substring")
 
 
@@ -377,9 +383,9 @@ def test_model_price_glm_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_grok_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "grok-4") == (1.25, 2.5)
-    assert ai_sessions._model_price(table, "grok-3") == (3.0, 15.0)
-    assert ai_sessions._model_price(table, "grok-4-heavy") == (1.25, 2.5)
+    assert ai_sessions._model_price(table, "grok-4") == (1.25, 2.5, 1.25, 1.25)
+    assert ai_sessions._model_price(table, "grok-3") == (3.0, 15.0, 3.0, 3.0)
+    assert ai_sessions._model_price(table, "grok-4-heavy") == (1.25, 2.5, 1.25, 1.25)
     print("  [PASS] grok_substring")
 
 
@@ -388,8 +394,8 @@ def test_model_price_grok_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_llama_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "llama-4") == (0.2, 0.4)
-    assert ai_sessions._model_price(table, "llama-3") == (0.5, 0.75)
+    assert ai_sessions._model_price(table, "llama-4") == (0.2, 0.7, 0.2, 0.2)
+    assert ai_sessions._model_price(table, "llama-3") == (0.4, 0.4, 0.4, 0.4)
     print("  [PASS] llama_substring")
 
 
@@ -398,8 +404,8 @@ def test_model_price_llama_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_command_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "command-r") == (0.15, 0.6)
-    assert ai_sessions._model_price(table, "command-a") == (0.2, 0.8)
+    assert ai_sessions._model_price(table, "command-r") == (0.15, 0.6, 0.15, 0.15)
+    assert ai_sessions._model_price(table, "command-a") == (2.5, 10.0, 2.5, 2.5)
     print("  [PASS] command_substring")
 
 
@@ -408,8 +414,8 @@ def test_model_price_command_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_codex_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "codex") == (1.75, 14.0)
-    assert ai_sessions._model_price(table, "codex-cushman") == (1.75, 14.0)
+    assert ai_sessions._model_price(table, "codex") == (1.75, 14.0, 0.175, 0.0)
+    assert ai_sessions._model_price(table, "codex-cushman") == (1.75, 14.0, 0.175, 0.0)
     print("  [PASS] codex_substring")
 
 
@@ -438,9 +444,9 @@ def test_merge_pricing_none_values():
 # ---------------------------------------------------------------------------
 def test_model_price_mistral_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "mistral-large") == (2.0, 6.0)
-    assert ai_sessions._model_price(table, "mistral-small") == (0.2, 0.6)
-    assert ai_sessions._model_price(table, "mistral-3") == (1.0, 3.0)
+    assert ai_sessions._model_price(table, "mistral-large") == (2.0, 6.0, 2.0, 2.0)
+    assert ai_sessions._model_price(table, "mistral-small") == (0.15, 0.6, 0.15, 0.15)
+    assert ai_sessions._model_price(table, "mistral-large-3") == (0.5, 1.5, 0.5, 0.5)
     print("  [PASS] mistral_substring")
 
 
@@ -449,8 +455,8 @@ def test_model_price_mistral_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_moonshot_kimi_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "moonshot-v3") == (1.0, 3.0)
-    assert ai_sessions._model_price(table, "kimi-k3") == (1.0, 3.0)
+    assert ai_sessions._model_price(table, "moonshot-v3") == (1.0, 3.0, 1.0, 1.0)
+    assert ai_sessions._model_price(table, "kimi-k3") == (3.0, 15.0, 3.0, 3.0)
     print("  [PASS] moonshot_kimi_substring")
 
 
@@ -459,8 +465,8 @@ def test_model_price_moonshot_kimi_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_doubao_ernie_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "doubao-pro") == (0.3, 0.6)
-    assert ai_sessions._model_price(table, "ernie-4.5") == (0.57, 2.57)
+    assert ai_sessions._model_price(table, "doubao-pro") == (0.3, 0.6, 0.3, 0.3)
+    assert ai_sessions._model_price(table, "ernie-4.5") == (0.42, 1.25, 0.42, 0.42)
     print("  [PASS] doubao_ernie_substring")
 
 
@@ -482,7 +488,7 @@ def test_pricing_table_file_broken_fallback(tmp_path):
 # 41. _model_price：zero-length table
 # ---------------------------------------------------------------------------
 def test_model_price_empty_table():
-    assert ai_sessions._model_price({}, "gpt-4o") == (0.0, 0.0)
+    assert ai_sessions._model_price({}, "gpt-4o") == (0.0, 0.0, 0.0, 0.0)
     print("  [PASS] empty_table")
 
 
@@ -501,8 +507,8 @@ def test_merge_pricing_short_list():
 # ---------------------------------------------------------------------------
 def test_model_price_unicode():
     table = {"m-模型": (1.0, 2.0)}
-    assert ai_sessions._model_price(table, "m-模型") == (1.0, 2.0)
-    assert ai_sessions._model_price(table, "unknown") == (0.0, 0.0)
+    assert ai_sessions._model_price(table, "m-模型") == (1.0, 2.0, 1.0, 1.0)
+    assert ai_sessions._model_price(table, "unknown") == (0.0, 0.0, 0.0, 0.0)
     print("  [PASS] unicode")
 
 
@@ -524,9 +530,9 @@ def test_pricing_table_expanduser(monkeypatch, tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_key_overlap():
     table = {"gpt": (1.0, 2.0), "gpt-4o": (3.0, 12.0), "gpt-4o-mini": (5.0, 20.0)}
-    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 20.0)
-    assert ai_sessions._model_price(table, "gpt-4o") == (3.0, 12.0)
-    assert ai_sessions._model_price(table, "gpt-4") == (1.0, 2.0)
+    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 20.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "gpt-4o") == (3.0, 12.0, 3.0, 3.0)
+    assert ai_sessions._model_price(table, "gpt-4") == (1.0, 2.0, 1.0, 1.0)
     print("  [PASS] key_overlap")
 
 
@@ -557,9 +563,9 @@ def test_pricing_table_nested_missing():
 # ---------------------------------------------------------------------------
 def test_model_price_o_series():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "o3-mini") == (1.1, 4.4)
-    assert ai_sessions._model_price(table, "o4-mini") == (1.1, 4.4)
-    assert ai_sessions._model_price(table, "o3-pro") == (20.0, 80.0)
+    assert ai_sessions._model_price(table, "o3-mini") == (1.1, 4.4, 1.1, 1.1)
+    assert ai_sessions._model_price(table, "o4-mini") == (1.1, 4.4, 1.1, 1.1)
+    assert ai_sessions._model_price(table, "o3-pro") == (20.0, 80.0, 20.0, 20.0)
     print("  [PASS] o_series")
 
 
@@ -596,9 +602,9 @@ def test_pricing_table_reload(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_claude_family():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "claude-opus-5") == (5.0, 25.0)
-    assert ai_sessions._model_price(table, "claude-sonnet-5") == (2.0, 10.0)
-    assert ai_sessions._model_price(table, "claude-haiku") == (0.25, 1.25)
+    assert ai_sessions._model_price(table, "claude-opus-5") == (5.0, 25.0, 0.5, 6.25)
+    assert ai_sessions._model_price(table, "claude-sonnet-5") == (2.0, 10.0, 0.2, 2.5)
+    assert ai_sessions._model_price(table, "claude-haiku") == (0.25, 1.25, 0.025, 0.3125)
     print("  [PASS] claude_family")
 
 
@@ -607,21 +613,21 @@ def test_model_price_claude_family():
 # ---------------------------------------------------------------------------
 def test_model_price_gpt_family():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "gpt-5") == (1.25, 10.0)
-    assert ai_sessions._model_price(table, "gpt-5-mini") == (0.25, 2.0)
-    assert ai_sessions._model_price(table, "gpt-4.1") == (2.0, 8.0)
-    assert ai_sessions._model_price(table, "gpt-4-turbo") == (10.0, 30.0)
-    assert ai_sessions._model_price(table, "gpt-3.5-turbo") == (0.5, 1.5)
+    assert ai_sessions._model_price(table, "gpt-5") == (1.25, 10.0, 0.125, 0.0)
+    assert ai_sessions._model_price(table, "gpt-5-mini") == (0.25, 2.0, 0.025, 0.0)
+    assert ai_sessions._model_price(table, "gpt-4.1") == (2.0, 8.0, 2.0, 2.0)
+    assert ai_sessions._model_price(table, "gpt-4-turbo") == (10.0, 30.0, 10.0, 10.0)
+    assert ai_sessions._model_price(table, "gpt-3.5-turbo") == (0.5, 1.5, 0.5, 0.5)
     print("  [PASS] gpt_family")
 
 
 # ---------------------------------------------------------------------------
-# 53. _merge_pricing：list with extra elements
+# 53. _merge_pricing：4 元素列表 = 含缓存档的完整定价（Phase 1+2 新格式）
 # ---------------------------------------------------------------------------
 def test_merge_pricing_long_list():
     table: dict = {}
     ai_sessions._merge_pricing(table, {"m": [1, 2, 3, 4]})
-    assert table["m"] == (1.0, 2.0)
+    assert table["m"] == (1.0, 2.0, 3.0, 4.0)
     print("  [PASS] long_list")
 
 
@@ -645,7 +651,7 @@ def test_pricing_table_file_extra_keys(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_unicode_key():
     table = {"m-模型": (1.0, 2.0)}
-    assert ai_sessions._model_price(table, "m-模型") == (1.0, 2.0)
+    assert ai_sessions._model_price(table, "m-模型") == (1.0, 2.0, 1.0, 1.0)
     print("  [PASS] unicode_key")
 
 
@@ -666,11 +672,11 @@ def test_merge_pricing_dict_missing_fields():
 # ---------------------------------------------------------------------------
 def test_model_price_common_models():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "gemma") == (0.2, 0.6)
-    assert ai_sessions._model_price(table, "gemma-2") == (0.2, 0.6)
-    assert ai_sessions._model_price(table, "doubao") == (0.3, 0.6)
-    assert ai_sessions._model_price(table, "moonshot") == (1.0, 3.0)
-    assert ai_sessions._model_price(table, "kimi") == (1.0, 3.0)
+    assert ai_sessions._model_price(table, "gemma") == (0.2, 0.6, 0.2, 0.2)
+    assert ai_sessions._model_price(table, "gemma-2") == (0.2, 0.6, 0.2, 0.2)   # 无专键 → 兜底 gemma
+    assert ai_sessions._model_price(table, "doubao") == (0.3, 0.6, 0.3, 0.3)
+    assert ai_sessions._model_price(table, "moonshot") == (1.0, 3.0, 1.0, 1.0)
+    assert ai_sessions._model_price(table, "kimi") == (3.0, 15.0, 3.0, 3.0)     # kimi-k3 现价
     print("  [PASS] common_models")
 
 
@@ -693,9 +699,9 @@ def test_pricing_table_file_dict_format(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_qwen_variants():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6)
-    assert ai_sessions._model_price(table, "qwen-plus") == (0.8, 2.0)
-    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4)
+    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.3, 0.3)
+    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.26, 0.26)
+    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 1.6, 1.6)
     print("  [PASS] qwen_variants")
 
 
@@ -704,9 +710,11 @@ def test_model_price_qwen_variants():
 # ---------------------------------------------------------------------------
 def test_model_price_deepseek_variants():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "deepseek-r1") == (0.55, 2.19)
-    assert ai_sessions._model_price(table, "deepseek-chat") == (0.27, 1.1)
-    assert ai_sessions._model_price(table, "deepseek-v3") == (0.27, 1.1)
+    assert ai_sessions._model_price(table, "deepseek-r1") == (0.7, 2.5, 0.07, 0.7)
+    assert ai_sessions._model_price(table, "deepseek-v4-flash") == (0.089, 0.177, 0.0089, 0.089)
+    assert ai_sessions._model_price(table, "deepseek-v4-flash-free") == (0.089, 0.177, 0.0089, 0.089)
+    assert ai_sessions._model_price(table, "deepseek-chat") == (0.257, 1.029, 0.0257, 0.257)
+    assert ai_sessions._model_price(table, "deepseek-v3") == (0.27, 1.1, 0.027, 0.27)
     print("  [PASS] deepseek_variants")
 
 
@@ -732,12 +740,101 @@ def test_merge_pricing_file_then_config(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_other_models():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "kimi") == (1.0, 3.0)
-    assert ai_sessions._model_price(table, "moonshot") == (1.0, 3.0)
-    assert ai_sessions._model_price(table, "hunyuan") == (0.2, 0.9)
-    assert ai_sessions._model_price(table, "ernie") == (0.57, 2.57)
-    assert ai_sessions._model_price(table, "baichuan") == (0.5, 1.5)
-    assert ai_sessions._model_price(table, "minimax") == (0.2, 0.6)
-    assert ai_sessions._model_price(table, "step-1") == (0.5, 2.0)
-    assert ai_sessions._model_price(table, "yi") == (1.0, 3.0)
+    assert ai_sessions._model_price(table, "kimi") == (3.0, 15.0, 3.0, 3.0)      # kimi-k3 现价
+    assert ai_sessions._model_price(table, "kimi-k2") == (0.57, 2.3, 0.57, 0.57)
+    assert ai_sessions._model_price(table, "moonshot") == (1.0, 3.0, 1.0, 1.0)
+    assert ai_sessions._model_price(table, "hunyuan") == (0.2, 0.9, 0.2, 0.2)
+    assert ai_sessions._model_price(table, "ernie") == (0.57, 2.57, 0.57, 0.57)
+    assert ai_sessions._model_price(table, "baichuan") == (0.5, 1.5, 0.5, 0.5)
+    assert ai_sessions._model_price(table, "minimax") == (0.3, 1.2, 0.3, 0.3)
+    assert ai_sessions._model_price(table, "step-1") == (0.5, 2.0, 0.5, 0.5)
+    assert ai_sessions._model_price(table, "yi") == (1.0, 3.0, 1.0, 1.0)
     print("  [PASS] other_models")
+
+
+# ---------------------------------------------------------------------------
+# 63. _price4：2 元组自动补 (in, out, in, in)（未配缓存档按输入价计，保守高估）
+# ---------------------------------------------------------------------------
+def test_price4_two_tuple_expands_to_input_price():
+    # 2 元组 (in, out) 自动补 (in, in)：缓存读/写都按输入价计（保守高估）
+    assert ai_sessions._price4((1.0, 2.0)) == (1.0, 2.0, 1.0, 1.0)
+    assert ai_sessions._price4((2.5, 10.0)) == (2.5, 10.0, 2.5, 2.5)
+    # list 表值同样归一化
+    assert ai_sessions._price4([2.5, 10.0]) == (2.5, 10.0, 2.5, 2.5)
+    print("  [PASS] price4_two_tuple_expands")
+
+
+# ---------------------------------------------------------------------------
+# 64. _price4：显式 4 元组按档原样取；非法/过短值归零
+# ---------------------------------------------------------------------------
+def test_price4_four_tuple_passthrough_and_invalid():
+    assert ai_sessions._price4((1.0, 2.0, 0.1, 1.25)) == (1.0, 2.0, 0.1, 1.25)
+    assert ai_sessions._price4([3.0, 15.0, 0.3, 3.75]) == (3.0, 15.0, 0.3, 3.75)
+    # 非法值：过短 / 非数值 / None → (0, 0, 0, 0)
+    assert ai_sessions._price4((1.0,)) == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._price4("bad") == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._price4(None) == (0.0, 0.0, 0.0, 0.0)
+    print("  [PASS] price4_four_tuple_passthrough")
+
+
+# ---------------------------------------------------------------------------
+# 65. _model_price：显式 4 元组按档取（缓存读/写不再退化为输入价）
+# ---------------------------------------------------------------------------
+def test_model_price_explicit_four_tuple_tiers():
+    table = {"m": (1.0, 2.0, 0.1, 1.25)}
+    assert ai_sessions._model_price(table, "m") == (1.0, 2.0, 0.1, 1.25)
+    # 子串命中同样返回显式 4 元组
+    assert ai_sessions._model_price(table, "m-pro") == (1.0, 2.0, 0.1, 1.25)
+    print("  [PASS] model_price_four_tuple_tiers")
+
+
+# ---------------------------------------------------------------------------
+# 66. _model_price：claude 系缓存档 = 读 0.1×输入、写 1.25×输入
+# ---------------------------------------------------------------------------
+def test_model_price_claude_cache_ratios():
+    table = ai_sessions._pricing_table({})
+    for name, in_out in (("claude-sonnet-4-5", (3.0, 15.0)),
+                         ("claude-opus-5", (5.0, 25.0)),
+                         ("claude-haiku-4-5", (1.0, 5.0))):
+        p = ai_sessions._model_price(table, name)
+        assert p[:2] == in_out, f"{name} 进出价应 {in_out}，实际 {p[:2]}"
+        assert abs(p[2] - 0.1 * p[0]) < 1e-9, f"{name} 缓存读应 0.1×输入，实际 {p[2]}"
+        assert abs(p[3] - 1.25 * p[0]) < 1e-9, f"{name} 缓存写应 1.25×输入，实际 {p[3]}"
+    print("  [PASS] claude_cache_ratios")
+
+
+# ---------------------------------------------------------------------------
+# 67. _model_price：deepseek 裸键兜底（未知新版本型号不再 0 价）
+# ---------------------------------------------------------------------------
+def test_model_price_deepseek_bare_key_fallback():
+    table = ai_sessions._pricing_table({})
+    # 表里没有 "deepseek-v4.1-flash"（只有 v4-flash/v4-pro 等）→ 落到裸键 "deepseek"
+    p = ai_sessions._model_price(table, "deepseek-v4.1-flash-expires-on-0910")
+    assert p == (0.27, 1.10, 0.027, 0.27), f"deepseek 裸键兜底价，实际 {p}"
+    # 与已知家族型号同价（对齐 v3.x 主力价）
+    assert p == ai_sessions._model_price(table, "deepseek-v3")
+    # 完全未知的非 deepseek 家族型号仍是 0 价（不能误兜底）
+    assert ai_sessions._model_price(table, "zzz-brand-new-ai") == (0.0, 0.0, 0.0, 0.0)
+    print("  [PASS] deepseek_bare_key_fallback")
+
+
+# ---------------------------------------------------------------------------
+# 68. _merge_pricing：四种格式兼容（[in,out] / [in,out,cr,cw] /
+#     {input,output} / {input,output,cache_read,cache_write}）
+# ---------------------------------------------------------------------------
+def test_merge_pricing_all_four_formats():
+    table: dict = {}
+    ai_sessions._merge_pricing(table, {
+        "a-list2": [1, 2],
+        "b-list4": [1, 2, 0.1, 1.25],
+        "c-dict2": {"input": 3, "output": 4},
+        "d-dict4": {"input": 5, "output": 6, "cache_read": 0.5, "cache_write": 6.25},
+    })
+    assert table["a-list2"] == (1.0, 2.0)
+    assert table["b-list4"] == (1.0, 2.0, 0.1, 1.25)
+    assert table["c-dict2"] == (3.0, 4.0)
+    assert table["d-dict4"] == (5.0, 6.0, 0.5, 6.25)
+    # dict 只给 cache_read 时 cache_write 按输入价补（保守高估，与 2 元组口径一致）
+    ai_sessions._merge_pricing(table, {"e-part": {"input": 2, "output": 4, "cache_read": 0.2}})
+    assert table["e-part"] == (2.0, 4.0, 0.2, 2.0)
+    print("  [PASS] merge_pricing_all_four_formats")

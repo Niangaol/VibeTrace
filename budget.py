@@ -17,8 +17,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import re
+
+import metrics_util  # 统计辅助单一来源：美元格式化（纯函数，无业务依赖）
 
 # ---------------------------------------------------------------------------
 # 默认预算配置（读 config.insights.budget；老用户 config.json 无该段也自动兜底）
@@ -178,19 +181,28 @@ def budget_status(date: str, data_root: str, config: dict, period: str | None = 
     day_rows: list[dict] = []
     by_tool: dict[str, float] = {}
     by_project: dict[str, float] = {}
-    for d in days:
-        try:
-            day = _collect_day(d, data_root, config)
-        except Exception:  # noqa: BLE001 —— 单日聚合异常视为当日无数据，不阻断整段预算
-            continue
-        if not day.get("found"):
-            continue
-        day_rows.append({"date": d, "cost": day["cost"]})
-        spent += day["cost"]
-        for name, cost in (day.get("by_tool") or {}).items():
-            by_tool[name] = by_tool.get(name, 0.0) + float(cost)
-        for name, cost in (day.get("by_project") or {}).items():
-            by_project[name] = by_project.get(name, 0.0) + float(cost)
+    # 批作用域（v2.9 性能修复，同 query.run_query 先例）：整段逐日收集共享一次
+    # 目录指纹/枚举，monthly 档整月 30+ 天不再逐日全树扫盘。ai_sessions 与
+    # _collect_day 同款惰性导入：不可用时退化为逐次现算（原逐日降级语义不变）。
+    try:
+        import ai_sessions  # noqa: PLC0415
+        batch = ai_sessions.collect_fingerprint_batch()
+    except Exception:  # noqa: BLE001 —— 缺模块不阻断：与单日收集失败同样降级
+        batch = contextlib.nullcontext()
+    with batch:
+        for d in days:
+            try:
+                day = _collect_day(d, data_root, config)
+            except Exception:  # noqa: BLE001 —— 单日聚合异常视为当日无数据，不阻断整段预算
+                continue
+            if not day.get("found"):
+                continue
+            day_rows.append({"date": d, "cost": day["cost"]})
+            spent += day["cost"]
+            for name, cost in (day.get("by_tool") or {}).items():
+                by_tool[name] = by_tool.get(name, 0.0) + float(cost)
+            for name, cost in (day.get("by_project") or {}).items():
+                by_project[name] = by_project.get(name, 0.0) + float(cost)
 
     ratio = spent / budget if budget > 0 else 0.0
     if ratio >= 1.0:
@@ -290,18 +302,8 @@ def budget_week_summary(days: list[str], data_root: str, config: dict) -> str | 
 
 
 def _fmt_usd(value) -> str:
-    """美元格式化（与 ai_sessions._fmt_cost 风格一致，就地实现避免跨模块耦合）。"""
-    try:
-        v = float(value or 0)
-    except (TypeError, ValueError):
-        v = 0.0
-    if v == 0:
-        return "$0"
-    if v < 0.01:
-        return f"${v:.4f}"
-    if v < 1:
-        return f"${v:.3f}"
-    return f"${v:.2f}"
+    """美元格式化：转发到 metrics_util.fmt_usd（与 ai_sessions._fmt_cost 同一实现，保测试兼容）。"""
+    return metrics_util.fmt_usd(value)
 
 
 if __name__ == "__main__":

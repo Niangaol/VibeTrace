@@ -116,8 +116,8 @@ def test_parse_dsh_usage_normalized(tmp_path):
     assert len(assistant) == 2
     assert assistant[0]["usage"] == {"input_tokens": 2202, "output_tokens": 140}
     assert assistant[1]["usage"] == {"input_tokens": 3000, "output_tokens": 30}
-    # _message_usage 能识别归一化后的键
-    assert ai_sessions._message_usage(assistant[0]) == (2202, 140)
+    # _message_usage 能识别归一化后的键（Phase 1+2 起返回互斥 4 元组）
+    assert ai_sessions._message_usage(assistant[0]) == (2202, 140, 0, 0)
     print("  [PASS] parse_dsh_usage_normalized")
 
 
@@ -209,10 +209,10 @@ def test_collect_dsh_integration(tmp_path):
 
 def test_message_usage_camelcase_and_pi_keys():
     """_message_usage 识别 pi 的 input/output 与 dsh 的 inputTokens/outputTokens。"""
-    assert ai_sessions._message_usage({"usage": {"input": 8064, "output": 182}}) == (8064, 182)
-    assert ai_sessions._message_usage({"usage": {"inputTokens": 13154, "outputTokens": 121}}) == (13154, 121)
+    assert ai_sessions._message_usage({"usage": {"input": 8064, "output": 182}}) == (8064, 182, 0, 0)
+    assert ai_sessions._message_usage({"usage": {"inputTokens": 13154, "outputTokens": 121}}) == (13154, 121, 0, 0)
     # totalTokens 兜底：in/out 全缺时输出侧 0
-    assert ai_sessions._message_usage({"usage": {"totalTokens": 8246}}) == (8246, 0)
+    assert ai_sessions._message_usage({"usage": {"totalTokens": 8246}}) == (8246, 0, 0, 0)
     # 顶层平铺 pi 键
-    assert ai_sessions._message_usage({"input": 5, "output": 3}) == (5, 3)
+    assert ai_sessions._message_usage({"input": 5, "output": 3}) == (5, 3, 0, 0)
     print("  [PASS] message_usage_camelcase_and_pi_keys")

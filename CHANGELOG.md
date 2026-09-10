@@ -8,6 +8,27 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [2.9.4] - 2026-09-10
+
+> 主题：内部框架统一（tool_registry 工具注册表 + metrics_util 统计辅助单一来源）+ 仪表盘响应缓存框架（TTL + SWR 单飞）+ 前端健壮性（错误横幅 / 换日竞态保护 / 非阻塞加载）+ AI 编程热力图（概览）。
+
+### 新特性
+- **AI 编程热力图（概览）**：概览新增 28 天 × 24 小时热力图，展示全部已知 agent 工具 Token 用量（in+out 合计）；服务启动后台预热，TTL 响应缓存（120s + stale-while-revalidate）秒开
+- **tool_registry.py 工具注册表（唯一事实源）**：21 个本地工具 + 4 个纯 Web AI 的「默认目录 / 专用解析器 / 缓存豁免 / 指纹特判 / Web 域名 / 别名」收敛为一条 ToolSpec 记录；ai_sessions / query / tool_compare / dashboard 统一消费；新增工具只改一处（docs/HARNESSES.md 附适配清单）。模型→厂商映射（MODEL_VENDOR_PREFIXES）随 /api/pricing 下发前端，前端本地兜底表仅降级用
+- **metrics_util.py 统计辅助单一来源**：fmt_usd / shannon_entropy / hhi / count_switches / tool_switch_series / merge_dim 收拢，budget / growth / insights / tool_compare / ai_sessions 原先各写一份的实现统一（熵/HHI 的精度口径差异由调用方各自舍入）
+- **仪表盘响应缓存框架**：单日/区间重端点统一接入 TTL（60s）+ stale-while-revalidate + 单飞（CAS）缓存：urls / ai-sessions / timeline / ai-compare / insights / heatmap；冷态并发请求绝不重复重算（8 路并发只 compute 1 次），错误响应不入缓存
+- **报表措辞**：有真实 usage（含缓存）的 Token 不再称「估算」
+
+### 修复
+- **非法日历日穿透 400 契约**：_valid_date 此前只校验 YYYY-MM-DD 正则，"2026-13-99" / "2026-02-30" 这类格式合法但日历不存在的日期以空数据 200 通过（初版遗留；_valid_month 与 ai-compare 早有语义校验）。补 fromisoformat 语义校验，14 个单日端点（ai-sessions / insights / timeline / budget 等）全部受益
+- **前端健壮性**：视图加载失败不再清空 DOM（错误横幅 + 重试按钮，state.loaded 置回 false）；换日后旧响应作废（日期标记防慢响应覆盖新面板）；概览浏览器停留 / ai-sessions / budget 改为非阻塞加载；本地日期函数 localDateStr 替代 toISOString（东八区本地零点不再倒退成前一天）
+- **/api/days?n=abc 回退 14**：非法 n 不再 500（B1 回归钉扎）
+- **config.json 行尾噪音**：工作区误转 CRLF 已恢复 LF（内容零差异，diff 归零）
+
+### 测试（2.9.4）
+- 新增响应缓存契约（SWR 过期回旧值 / 后台刷新 / 错误不入缓存 / 8 路并发单飞）、语义日期 400、前端 wiring 扩充、token cache 修复、tool_registry 解析
+- 全量回归 730 passed, 0 failed
+
 ## [2.9.3] - 2026-08-31
 
 > 主题：vibe coding 指标修正（growth 三指标复活 + insights 两处假数据）+ 新增 ZCode / Codex 会话深度适配 + DSH zstd 会话支持（补录此前未提交的工作区改动）。

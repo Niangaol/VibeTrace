@@ -41,14 +41,14 @@ def test_fmt_cost_edges():
 
 def test_model_price_matching():
     table = {"gpt-4o": (5.0, 15.0), "claude": (3.0, 15.0), "deepseek": (1.0, 2.0)}
-    # 精确匹配
-    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0)
+    # 精确匹配（Phase 1+2 起统一返回 4 元组：2 元组表值自动补 (in, in) 缓存档）
+    assert ai_sessions._model_price(table, "gpt-4o") == (5.0, 15.0, 5.0, 5.0)
     # 子串匹配（最长键优先）
-    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 15.0)
-    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0)
+    assert ai_sessions._model_price(table, "gpt-4o-mini") == (5.0, 15.0, 5.0, 5.0)
+    assert ai_sessions._model_price(table, "claude-3-5-sonnet") == (3.0, 15.0, 3.0, 3.0)
     # 未命中
-    assert ai_sessions._model_price(table, "unknown-model") == (0.0, 0.0)
-    assert ai_sessions._model_price(table, "") == (0.0, 0.0)
+    assert ai_sessions._model_price(table, "unknown-model") == (0.0, 0.0, 0.0, 0.0)
+    assert ai_sessions._model_price(table, "") == (0.0, 0.0, 0.0, 0.0)
     print("  [PASS] model_price")
 
 
@@ -177,3 +177,27 @@ def test_collect_web_ai_scalar_tolerated(tmp_path):
                                web_visits=visits)
     assert r_on["web_ai"]["found"] is True    # true → 视为开启
     print("  [PASS] collect_web_ai_scalar_tolerated")
+
+
+def test_collect_hourly_tokens(tmp_path):
+    """collect 的 total.hourly_tokens 按消息本地小时分桶（in+out 合计，所有工具）。"""
+    d = tmp_path / "sess"
+    d.mkdir()
+    recs = [
+        {"role": "user", "content": "hi", "timestamp": "2026-01-01T10:30:00"},
+        {"role": "assistant", "content": "hello", "timestamp": "2026-01-01T10:31:00"},
+        {"role": "user", "content": "再算一次", "timestamp": "2026-01-01T23:59:00"},
+    ]
+    (d / "a.jsonl").write_text("\n".join(json.dumps(r, ensure_ascii=False) for r in recs),
+                               encoding="utf-8")
+    cfg = {"ai_sessions": {"enabled": True, "token_estimation": True,
+                           "paths": {"t": [str(d)]}}}
+    ai_sessions.invalidate_collect_cache()
+    total = ai_sessions.collect("2026-01-01", cfg)["total"]
+    ht = total["hourly_tokens"]
+    assert len(ht) == 24
+    # weighted 估算："hi"=1、"hello"=2 → 10 时桶 3；"再算一次"=4 CJK → 23 时桶 4
+    assert ht[10] == 3, f"10 时桶应为 3，实际 {ht[10]}"
+    assert ht[23] == 4, f"23 时桶应为 4，实际 {ht[23]}"
+    assert sum(ht) == total["tokens_total"]  # 分桶合计 = 总 token（无时间戳消息才会漏）
+    print("  [PASS] collect_hourly_tokens")

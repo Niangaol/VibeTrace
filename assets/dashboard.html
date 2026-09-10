@@ -342,6 +342,11 @@
   html[data-theme="light"] .sk::after{background:linear-gradient(90deg,transparent,rgba(20,25,36,.06),transparent)}
   @keyframes shimmer{to{transform:translateX(100%)}}
   .empty{padding:34px 0;text-align:center;color:var(--faint);font-size:12.5px}
+  /* 视图加载失败的错误横幅（带重试按钮，不清空视图内容） */
+  .view-error{display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap;
+    padding:10px 14px;margin:0 0 12px;border:1px solid var(--danger);border-radius:var(--radius);
+    background:var(--danger-soft);color:var(--danger);font-size:12.5px}
+  .view-error .btn{flex-shrink:0}
   canvas{width:100%;display:block}
 
   /* ---------- 热力图 ---------- */
@@ -502,7 +507,10 @@
       </div>
       <div class="grid">
         <div class="panel"><h2>今日应用 Top 10</h2><div id="ovApps"></div></div>
-        <div class="panel"><h2>AI 工具 / 联系人</h2><div id="ovMisc"></div></div>
+        <div class="panel"><h2>AI 编程热力图（24 小时 × 最近 28 天）<span class="hint">行=小时 · 列=日期 · 所有 agent 工具 Token 用量</span></h2>
+          <div id="ovAiHeatmap"></div>
+          <div class="hm-legend">少 <span class="sw" style="background:var(--hm-1)"></span><span class="sw" style="background:var(--hm-2)"></span><span class="sw" style="background:var(--hm-3)"></span><span class="sw" style="background:var(--hm-4)"></span><span class="sw" style="background:var(--hm-5)"></span> 多</div>
+        </div>
       </div>
       <div class="panel"><h2>AI 会话深度 <span class="hint">本地会话 + 浏览器 Web AI 会话 · 始终开启</span></h2><div id="ovAiSessions"></div></div>
     </section>
@@ -816,6 +824,7 @@
       <div class="set-group">
         <h3>💲 AI 模型价格（成本估算）</h3>
         <div class="desc">成本估算 = Token 数 × 单价 ÷ 1,000,000，单价单位 USD / 百万 Token（输入为 USD，输出通常更贵）。
+          缓存读/写是命中缓存时的输入侧优惠价，未单独标价的模型按输入价计。
           内置常见模型价目表（量级参考，会随厂商调整），可在此<b>覆盖未收录/价格变动</b>的模型——保存后用于时间轴/对比/成本统计。</div>
         <div id="priceTip" class="hint" style="margin:6px 0 10px"></div>
         <div id="priceList" style="display:grid;gap:8px;margin-bottom:10px"></div>
@@ -891,7 +900,8 @@ const TITLES = {overview:"概览",trends:"趋势",report:"日报",week:"周报",
                 sessions:"会话",timeline:"时间轴",growth:"成长",compare:"对比",log:"日志",groups:"分组",insights:"洞察",settings:"设置"};
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const state = { view:"overview", day:null, month:null, dates:[], loaded:{}, authed:!AUTH_REQUIRED };
+const state = { view:"overview", day:null, month:null, dates:[], loaded:{}, authed:!AUTH_REQUIRED,
+                modelVendors:null };  // 后端"模型前缀→厂商名"映射的运行时缓存（/api/pricing 响应里带来；没到货前用本地兜底表）
 const NO_ANIM = location.search.includes("static=1") || matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /* ---------- 访问口令（P1-8） ---------- */
@@ -1044,7 +1054,8 @@ function statRows(data, fmt, opts){
   opts = opts || {};
   const icon = !!opts.icon;
   const max = Math.max(1, ...Object.values(data));
-  return Object.entries(data).sort((a,b)=>b[1]-a[1]).map(([k,v])=>{
+  const entries = Object.entries(data).sort((a,b)=>b[1]-a[1]).slice(0, opts.limit || undefined);
+  return entries.map(([k,v])=>{
     const pct = Math.max(2, Math.round(v/max*100));
     const nameCell = icon
       ? '<span class="app-cell">'+appIconHtml(k)+'<span class="app-name">'+esc(k)+'</span></span>'
@@ -1094,8 +1105,28 @@ function switchView(v, push){
   if(!state.loaded[v]){
     state.loaded[v] = true;
     Promise.resolve().then(async () => {
+      const box = $("#view-" + v);
+      // 重新加载前先移除上一次失败留下的错误横幅
+      if(box) box.querySelectorAll(".view-error").forEach(el => el.remove());
       try { await loaders[v](); }
-      catch(err){ const box = $("#view-" + v); if(box) box.innerHTML = '<div class="empty">加载失败：' + esc(err.message) + '</div>'; }
+      catch(err){
+        // 失败不清空视图 DOM（元素还在，后续加载才不会因找不到元素而报错）；
+        // loaded 置回 false 允许下次进入/点重试时重新加载
+        state.loaded[v] = false;
+        const b = $("#view-" + v);
+        if(b && !b.querySelector(".view-error")){
+          const bar = document.createElement("div");
+          bar.className = "view-error";
+          bar.innerHTML = '<span>加载失败：' + esc(err.message || err) + '</span>';
+          const btn = document.createElement("button");
+          btn.className = "btn";
+          btn.textContent = "重试";
+          // loaded 已是 false，switchView 会重新跑该视图的 loader
+          btn.onclick = () => switchView(v, false);
+          bar.appendChild(btn);
+          b.prepend(bar);
+        }
+      }
     });
   }
 }
@@ -1119,10 +1150,14 @@ function pickDay(d){
   state.day = d; $("#daySel").value = d;
   // 换日后所有依赖日期的视图数据失效，切回时按新日期重载（避免仍显示旧日期数据）
   ["overview","report","sessions","timeline","insights"].forEach(v=>{ state.loaded[v] = false; });
-  const reload = {overview:loadOverview, report:loadReport, sessions:loadSessions, insights:loadInsights}[state.view];
+  const reload = {overview:loadOverview, report:loadReport, sessions:loadSessions, timeline:loadTimeline, insights:loadInsights}[state.view];
   if(reload){ state.loaded[state.view] = true; reload(); }
 }
-function todayStr(){ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+// 本地日期 YYYY-MM-DD（补零）。不用 toISOString()——那按 UTC 计算，东八区本地零点会倒退成前一天
+function localDateStr(d){
+  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+}
+function todayStr(){ return localDateStr(new Date()); }
 
 /* ---------- 主题切换（P1-7） ---------- */
 const THEME_LABEL = {auto:"🌗 自动", light:"☀️ 浅色", dark:"🌙 深色"};
@@ -1325,6 +1360,7 @@ function drawBarChart(cv, labels, values, fmt){
 
 /* ---------- 概览 ---------- */
 async function loadOverview(){
+  const day = state.day;  // 给本轮打上日期标记：换日后旧回调据此作废，防慢响应覆盖新面板
   const cards = $("#ovCards");
   cards.innerHTML = [0,1,2,3].map(()=>'<div class="card"><div class="label">…</div><div class="sk" style="height:26px;margin-top:7px"></div></div>').join("");
   const d = await api("/api/day?date=" + state.day);
@@ -1339,45 +1375,50 @@ async function loadOverview(){
   countUp($("#cTotal"), a.total_active_ms, fmtMs);
   countUp($("#cAi"), ai, fmtMs);
   countUp($("#cSocial"), social, fmtMs);
-  try{
-    const u = await api("/api/urls?date=" + state.day);
+  // 浏览器停留不阻塞概览：请求发出后先渲染其他面板，数据回来再填充
+  api("/api/urls?date=" + day).then(u=>{
+    if (state.day !== day) return;  // 日期已变，旧响应作废
     countUp($("#cUrl"), (u.total_duration_s||0)*1000, fmtMs);
-  }catch(e){ $("#cUrl").textContent = "-"; }
+  }).catch(()=>{ if (state.day !== day) return; $("#cUrl").textContent = "-"; });
   $("#ovCats").innerHTML = skeleton(6);
   $("#ovCats").innerHTML = statRows(a.by_category, fmtMs);   // 类别：不启用图标
-  $("#ovApps").innerHTML = statRows(a.by_app, fmtMs, {icon:true});
-  const aiBlock = '<div style="margin-bottom:16px"><b style="font-size:12px;color:var(--dim);letter-spacing:.4px">AI 工具</b>' +
-    (Object.keys(a.by_ai||{}).length ? statRows(a.by_ai, fmtMs, {icon:true}) : '<div class="empty">（无 AI 工具记录）</div>') + '</div>';
-  const ctBlock = '<div><b style="font-size:12px;color:var(--dim);letter-spacing:.4px">联系人</b>' +
-    ((a.by_contact && Object.keys(a.by_contact).length) ? statRows(Object.fromEntries(Object.entries(a.by_contact).flatMap(([app,cs])=>Object.entries(cs).map(([c,v])=>[app+"/"+c, v]))), fmtMs, {icon:true}) : '<div class="empty">（无联系人记录）</div>') + '</div>';
-  $("#ovMisc").innerHTML = aiBlock + ctBlock;
+  $("#ovApps").innerHTML = statRows(a.by_app, fmtMs, {icon:true, limit:10});
+  // AI 编程热力图（28 天 × 24 小时；所有已知 agent 工具 Token 用量）。
+  // tokens=1 才跑逐日 AI 会话统计（服务启动时已后台预热；未就绪则等待预热结果）——
+  // 刻意不 await：绝不阻塞概览其他面板，热力图就绪后自行填充。
+  $("#ovAiHeatmap").innerHTML = '<div class="empty">Token 统计进行中…（服务启动后首次约需 1 分钟，之后秒开）</div>';
+  api("/api/heatmap?days=28&tokens=1").then(hmAi=>{
+    if (state.day !== day) return;  // 固定参数也防串轮：旧轮晚到不覆盖新面板
+    $("#ovAiHeatmap").innerHTML = heatmapHTML(hmAi.days, "hourly_tokens", fmtTok);
+  }).catch(()=>{ if (state.day !== day) return; $("#ovAiHeatmap").innerHTML = '<div class="empty">加载失败</div>'; });
   // AI 会话深度（始终开启，固定面板）
   $("#ovAiSessions").innerHTML = '<div class="empty">加载中…</div>';
-  try{
-    const sd = await api("/api/ai-sessions?date=" + state.day);
+  api("/api/ai-sessions?date=" + day).then(sd=>{
+    if (state.day !== day) return;
     renderAiSessions(sd.ai_sessions);
-  }catch(e){ $("#ovAiSessions").innerHTML = '<div class="empty">加载失败</div>'; }
+  }).catch(()=>{ if (state.day !== day) return; $("#ovAiSessions").innerHTML = '<div class="empty">加载失败</div>'; });
   // v2.6 P3：成本预算 banner（默认关闭；预算未开启/异常不打扰概览）
-  try{
-    const bd = await api("/api/budget?date=" + state.day);
+  api("/api/budget?date=" + day).then(bd=>{
+    if (state.day !== day) return;
     renderBudgetBanner(bd);
-  }catch(e){ /* 预算接口失败则不显示 banner */ }
+  }).catch(()=>{ /* 预算接口失败则不显示 banner */ });
   // v2.7：每日目标进度（可选功能，未开启不显示面板）
-  try{
-    const gd = await api("/api/goals?date=" + state.day);
+  api("/api/goals?date=" + day).then(gd=>{
+    if (state.day !== day) return;
     renderGoalsPanel(gd);
-  }catch(e){ /* 目标接口失败则不显示面板 */ }
+  }).catch(()=>{ /* 目标接口失败则不显示面板 */ });
   // 最近 14 天活跃趋势（单日数据失败/接口异常时降级显示，不影响其它面板）
-  try{
-    const days = await api("/api/days?n=14");
+  api("/api/days?n=14").then(days=>{
+    if (state.day !== day) return;
     drawBarChart($("#ovTrend"), days.days.map(x=>x.date), days.days.map(x=>x.total_ms),
       v => v>=3600000 ? (v/3600000).toFixed(1)+"h" : Math.round(v/60000)+"m");
-  }catch(err){
+  }).catch(err=>{
+    if (state.day !== day) return;
     const tcv = $("#ovTrend");
     if(tcv && tcv.parentElement){
       tcv.parentElement.insertAdjacentHTML("beforeend", '<div class="empty">趋势加载失败：' + esc(err.message || err) + '</div>');
     }
-  }
+  });
 }
 
 /* ---------- 每日目标面板（v2.7，可选功能；未开启隐藏） ---------- */
@@ -1432,27 +1473,27 @@ function renderBudgetBanner(b){
     '<div class="bb-bar"><div style="width:' + pct + '%;background:' + col + '"></div></div>';
 }
 
-/* ---------- 趋势 ---------- */
-async function loadTrends(){
-  $("#trHeatmap").innerHTML = skeleton(20);
-  $("#trBars").style.display = "none";
-  const hm = await api("/api/heatmap?days=84");
-  const maxH = Math.max(1, ...hm.days.flatMap(d=>d.hourly_ms));
-  const box = $("#trHeatmap");
+/* ---------- 热力图渲染（概览 AI 编程 Token 热力图 / 趋势总活跃热力图共用） ---------- */
+/* days: /api/heatmap 的 days 数组；field: "hourly_ms"（总活跃时长）| "hourly_tokens"
+   （全部已知 agent 工具 Token 用量）；fmt: 格子悬停数值格式化（fmtMs / fmtTok）。
+   色阶/图例/悬停共用同一套 --hm-* 设计令牌。 */
+const fmtTok = v => { v = Number(v) || 0; return v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(v); };
+function heatmapHTML(days, field, fmt){
+  const maxH = Math.max(1, ...days.flatMap(d=>(d[field]||[])));
   const lvl = [
     canvasCssVar("--hm-1","#242a36"), canvasCssVar("--hm-2","#2f3a4d"),
     canvasCssVar("--hm-3","#6b5323"), canvasCssVar("--hm-4","#a06f24"), canvasCssVar("--hm-5","#e0a53c")];
-  const nDays = hm.days.length;
+  const nDays = days.length;
   // 行=小时(24)，列=天数；flex 布局：标签列 + 每天一列
   const cols = [];
   for(let di=0; di<nDays; di++){
-    const day = hm.days[di];
+    const day = days[di];
     let col = '<div class="grid-col" title="'+day.date+'">';
     for(let hi=0; hi<24; hi++){
-      const ms = day.hourly_ms[hi] || 0;
+      const ms = (day[field]||[])[hi] || 0;
       const s = ms>0 ? Math.max(1, Math.min(4, Math.round(ms/maxH*4))) : 0;
       const delay = NO_ANIM ? 0 : (di*2+hi*0.3);
-      col += '<div class="cell" style="background:'+lvl[s]+';opacity:1;transition-delay:'+delay+'ms" title="'+day.date+' '+String(hi).padStart(2,"0")+':00 — '+fmtMs(ms)+'"></div>';
+      col += '<div class="cell" style="background:'+lvl[s]+';opacity:1;transition-delay:'+delay+'ms" title="'+day.date+' '+String(hi).padStart(2,"0")+':00 — '+fmt(ms)+'"></div>';
     }
     col += '</div>';
     cols.push(col);
@@ -1464,7 +1505,15 @@ async function loadTrends(){
   labels += '</div>';
   // 容器必须带 .hm 类：全部热力图规则（.hm .hl-col/.cell 等）都以它为前缀；
   // 且 hm 内部结构不参与 reveal 动画（避免 MutationObserver 给格子加 reveal-init 卡透明）
-  box.innerHTML = '<div class="hm">' + labels + cols.join("") + '</div>';
+  return '<div class="hm">' + labels + cols.join("") + '</div>';
+}
+
+/* ---------- 趋势 ---------- */
+async function loadTrends(){
+  $("#trHeatmap").innerHTML = skeleton(20);
+  $("#trBars").style.display = "none";
+  const hm = await api("/api/heatmap?days=84");
+  $("#trHeatmap").innerHTML = heatmapHTML(hm.days, "hourly_ms", fmtMs);
   $("#trBars").style.display = "block";
   drawBarChart($("#trBars"), hm.days.slice(-30).map(d=>d.date), hm.days.slice(-30).map(d=>d.total_ms),
     v => v>=3600000 ? (v/3600000).toFixed(1)+"h" : Math.round(v/60000)+"m");
@@ -1833,22 +1882,79 @@ function wireAiSettings(){
   if(ollamaBtn) ollamaBtn.onclick = fetchOllamaModels;
 }
 
-/* ---------- 价格按厂商分组（零后端，JS 前缀映射；展示顺序固定 6 组） ---------- */
+/* ---------- 价格按厂商分组（两级：后端映射优先，本地前缀兜底；展示顺序固定） ---------- */
 const PRICE_VENDORS = [
-  {id:"anthropic", name:"Anthropic", c:"var(--cat-2)"},
-  {id:"openai",    name:"OpenAI",    c:"var(--cat-1)"},
-  {id:"deepseek",  name:"DeepSeek",  c:"var(--cat-3)"},
-  {id:"google",    name:"Google",    c:"var(--cat-4)"},
-  {id:"cn",        name:"国内模型",   c:"var(--cat-5)"},
-  {id:"other",     name:"其他",       c:"var(--cat-6)"}
+  {id:"anthropic", name:"Anthropic",        c:"var(--cat-2)"},
+  {id:"openai",    name:"OpenAI",           c:"var(--cat-1)"},
+  {id:"google",    name:"Google",           c:"var(--cat-4)"},
+  {id:"meta",      name:"Meta",             c:"var(--cat-3)"},
+  {id:"mistral",   name:"Mistral",          c:"var(--cat-5)"},
+  {id:"xai",       name:"xAI",              c:"var(--cat-6)"},
+  {id:"cohere",    name:"Cohere",           c:"var(--cat-1)"},
+  {id:"amazon",    name:"Amazon",           c:"var(--cat-3)"},
+  {id:"microsoft", name:"Microsoft",        c:"var(--cat-4)"},
+  {id:"deepseek",  name:"DeepSeek",         c:"var(--cat-3)"},
+  {id:"zhipu",     name:"智谱 GLM",         c:"var(--cat-2)"},
+  {id:"moonshot",  name:"Kimi 月之暗面",     c:"var(--cat-5)"},
+  {id:"qwen",      name:"通义 Qwen",        c:"var(--cat-1)"},
+  {id:"ernie",     name:"文心 ERNIE",       c:"var(--cat-4)"},
+  {id:"doubao",    name:"豆包",              c:"var(--cat-6)"},
+  {id:"hunyuan",   name:"混元",              c:"var(--cat-2)"},
+  {id:"minimax",   name:"MiniMax",          c:"var(--cat-3)"},
+  {id:"cn-other",  name:"国内其他",          c:"var(--cat-5)"},
+  {id:"other",     name:"其他",              c:"var(--cat-6)"}
 ];
+/* 后端厂商名 → 本地分组 id 的对照表（model_vendors 里存的是展示名如 "Anthropic"，
+   本地分组用 id 如 "anthropic"，翻译一下才能复用上面各厂商组的配色和固定排序） */
+const VENDOR_NAME_TO_ID = {
+  "anthropic":"anthropic", "openai":"openai", "google":"google", "meta":"meta",
+  "mistral":"mistral", "xai":"xai", "cohere":"cohere", "amazon":"amazon",
+  "microsoft":"microsoft", "deepseek":"deepseek", "zhipu":"zhipu",
+  "moonshot":"moonshot", "qwen":"qwen", "minimax":"minimax",
+  "baidu":"ernie",       /* 文心/Spark 后端都记为 Baidu → 归入"文心 ERNIE"组 */
+  "bytedance":"doubao",  /* 豆包 */
+  "tencent":"hunyuan",   /* 混元 */
+  "01.ai":"cn-other", "stepfun":"cn-other", "baichuan":"cn-other"
+};
 function priceVendorOf(k){
   const s = String(k || "").toLowerCase();
+  /* 第一级：后端 /api/pricing 下发的 model_vendors（前缀→厂商名）。
+     后端只发扁平字典，匹配规则前端自己做：按"键长度降序"做前缀匹配（最长前缀优先，
+     例如 codestral 要先于普通短词命中）。wirePricing 在页面启动时就会请求一次
+     /api/pricing，正常情况首屏渲染前缓存已到货；请求失败或用户在到货前手动
+     添加模型时，缓存为 null/为空，自然落到第二级本地兜底。 */
+  const mv = state.modelVendors;
+  if(mv && typeof mv === "object"){
+    const prefixes = Object.keys(mv).sort((a,b) => b.length - a.length);  // 键长降序
+    for(const p of prefixes){
+      if(!p || !s.startsWith(String(p).toLowerCase())) continue;
+      // 命中前缀：把后端厂商名翻译成本地分组 id；对照不上的名字则继续走本地前缀
+      const id = VENDOR_NAME_TO_ID[String(mv[p] || "").trim().toLowerCase()];
+      if(id) return id;
+      break; // 后端命中但厂商名没对照上 → 落到本地兜底，仍归不进就进"其他"
+    }
+  }
+  /* 第二级：本地前缀兜底（离线、后端映射未到货或未命中时使用）。
+     注意：这里已删除 dsh 条目——dsh 是工具名不是模型前缀（后端 tool_registry 已修，
+     前端对齐），原先会把 dsh 开头的键误归到"国内其他"组。 */
   if(s.startsWith("claude")) return "anthropic";
-  if(s.startsWith("gpt") || /^o\d/.test(s) || s.startsWith("codex")) return "openai";
+  if(s.startsWith("gpt") || /^o\d/.test(s) || s.startsWith("chatgpt") || s.startsWith("codex")) return "openai";
+  if(s.startsWith("gemini") || s.startsWith("gemma")) return "google";
+  if(s.startsWith("llama")) return "meta";
+  if(/^(mistral|codestral|pixtral|ministral)/.test(s)) return "mistral";
+  if(s.startsWith("grok")) return "xai";
+  if(s.startsWith("command")) return "cohere";
+  if(s.startsWith("nova")) return "amazon";
+  if(/^(phi|wizardlm)/.test(s)) return "microsoft";
   if(s.startsWith("deepseek")) return "deepseek";
-  if(s.startsWith("gemini")) return "google";
-  if(/^(qwen|glm|chatglm|kimi|moonshot|doubao|ernie|hunyuan|dsh)([._/-]|$)/.test(s)) return "cn";
+  if(/^(glm|chatglm|zhipu)/.test(s)) return "zhipu";
+  if(/^(kimi|moonshot)/.test(s)) return "moonshot";
+  if(s.startsWith("qwen")) return "qwen";
+  if(s.startsWith("ernie")) return "ernie";
+  if(s.startsWith("doubao")) return "doubao";
+  if(s.startsWith("hunyuan")) return "hunyuan";
+  if(s.startsWith("minimax")) return "minimax";
+  if(/^(step|yi[-_ ]|baichuan|spark)/.test(s)) return "cn-other";
   return "other";
 }
 
@@ -1861,17 +1967,25 @@ function wirePricing(){
   function mergedKeys(){
     return [...new Set([...Object.keys(builtin), ...Object.keys(custom)])].sort((a,b)=>a.localeCompare(b));
   }
+  function norm4(v){
+    // 任意价目值 → [输入, 输出, 缓存读, 缓存写]；2 元旧格式按输入价补缓存档
+    //（与后端 _price4 口径一致：未单独标价的模型按输入价计，保守高估）
+    let a = Array.isArray(v) ? v : (v && typeof v === "object" ? [v.input, v.output, v.cache_read, v.cache_write] : []);
+    const i = a[0] != null ? a[0] : 0, o = a[1] != null ? a[1] : 0;
+    return [i, o, a[2] != null ? a[2] : i, a[3] != null ? a[3] : i];
+  }
   function disp(k){
     const v = (custom[k] !== undefined) ? custom[k] : builtin[k];
-    if(Array.isArray(v)) return v;
-    if(v && typeof v === "object") return [v.input != null ? v.input : 0, v.output != null ? v.output : 0];
-    return [0, 0];
+    return norm4(v);
   }
   async function refresh(){
     try{
       const d = await api("/api/pricing");
       builtin = d.builtin || {};
       custom = d.custom || {};
+      // 缓存后端"前缀→厂商名"映射：wirePricing 在页面启动（startApp）时就会执行到这里，
+      // 所以首屏定价列表渲染前映射已到货；请求失败时保持 null，priceVendorOf 走本地兜底表
+      state.modelVendors = d.model_vendors || null;
       tip.innerHTML = "内置 <b>" + (d.builtin_count||0) + "</b> 个模型价目（USD/百万 Token，量级参考；价格随厂商变动，请以官网为准）。"
         + "下列可直接修改任意模型单价——改动的会写入覆盖文件（<code>ai_pricing.json</code>），优先级高于内置；"
         + "点「重置」恢复内置默认值。";
@@ -1879,11 +1993,11 @@ function wirePricing(){
     }catch(e){ tip.textContent = "价格加载失败：" + e.message; }
   }
   function rowHtml(k){
-    // ⚠️ 红线：.price-row 内部结构与类名逐字保留（.pm/.pm-name/.pi/.po、data-key、
-    //    data-del/data-reset、●/＋ 标记）——collectOverrides() 与 list.onclick 委托零改动可用
+    // ⚠️ 红线：.pm/.pm-name/.pi/.po 的类名与 data-key/data-del/data-reset、●/＋ 标记逐字保留
+    //    （list.onclick 委托依赖）；缓存两列 .pcr/.pcw 追加在 .po 之后，collectOverrides() 按四元组收集
     const isC = Object.prototype.hasOwnProperty.call(custom, k);
     const v = disp(k);
-    const inV = (v[0] != null ? v[0] : 0), outV = (v[1] != null ? v[1] : 0);
+    const inV = v[0], outV = v[1], crV = v[2], cwV = v[3];   // 后两位来自 norm4 的输入价兜底
     const nameCell = (isC || !builtin[k])
       ? '<input class="pm" data-key="'+esc(k)+'" value="'+esc(k)+'" style="min-width:0">'  // 已覆盖/新增：模型名可编辑
       : '<span class="pm-name" data-key="'+esc(k)+'">'+esc(k)+'</span>';            // 内置：模型名只读
@@ -1892,10 +2006,12 @@ function wirePricing(){
       : '<button class="btn" data-reset="'+esc(k)+'">重置</button>';
     const tag = isC ? '<span style="color:var(--accent)" title="已覆盖">●</span> '
                     : (builtin[k] ? '' : '<span style="color:var(--ok)" title="新增">＋</span> ');
-    return '<div class="price-row" style="display:grid;grid-template-columns:1fr 120px 120px auto;gap:8px;align-items:center">'
+    return '<div class="price-row" style="display:grid;grid-template-columns:1fr 104px 104px 92px 92px auto;gap:8px;align-items:center">'
       + '<div style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+tag+nameCell+'</div>'
       + '<input class="pi" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(inV))+'" style="min-width:0">'  // 输入价 $/M
       + '<input class="po" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(outV))+'" style="min-width:0">' // 输出价 $/M
+      + '<input class="pcr" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(crV))+'" title="缓存读价 $/M：命中缓存时的输入侧优惠价，未单独标价按输入价计" style="min-width:0">' // 缓存读价 $/M
+      + '<input class="pcw" type="number" step="0.01" min="0" data-key="'+esc(k)+'" value="'+esc(String(cwV))+'" title="缓存写价 $/M：把上下文写入缓存的输入侧费用，未单独标价按输入价计" style="min-width:0">' // 缓存写价 $/M
       + act + '</div>';
   }
   function updateToggleLabel(){
@@ -1913,7 +2029,14 @@ function wirePricing(){
     list.querySelectorAll(".price-vhead[aria-expanded='true']").forEach(h => openVendors.add(h.dataset.vendor));
     const groups = {};
     for(const k of keys){ const vid = priceVendorOf(k); (groups[vid] = groups[vid] || []).push(k); }
+    // 列头：与 price-row 同一套 grid 列宽，标注四档单价的含义（悬停有通俗解释）
+    const head = '<div class="hint" style="display:grid;grid-template-columns:1fr 104px 104px 92px 92px auto;gap:8px;align-items:center;padding:0 2px">'
+      + '<span>模型</span><span>输入 $/M</span><span>输出 $/M</span>'
+      + '<span title="命中缓存时的输入侧优惠价，未单独标价的模型按输入价计">缓存读 $/M</span>'
+      + '<span title="把上下文写入缓存的输入侧费用，未单独标价的模型按输入价计">缓存写 $/M</span>'
+      + '<span>操作</span></div>';
     list.innerHTML =
+      head +
       '<div class="pv-tools"><button class="btn" id="pvToggleAll" type="button">全部展开</button></div>' +
       PRICE_VENDORS.filter(v => groups[v.id]).map(v => {
         const ks = groups[v.id];
@@ -1953,10 +2076,14 @@ function wirePricing(){
       if(!k) continue;
       const pi = Number(r.querySelector(".pi").value || 0);
       const po = Number(r.querySelector(".po").value || 0);
-      const base = builtin[k];
-      const same = Array.isArray(base) && Math.abs(base[0]-pi) < 1e-9 && Math.abs(base[1]-po) < 1e-9;
+      const pcr = Number(r.querySelector(".pcr").value || 0);   // 缓存读价（缺省已按输入价兜底）
+      const pcw = Number(r.querySelector(".pcw").value || 0);   // 缓存写价
+      // 与内置逐档比对：2 元内置先经 norm4 补齐缓存档，未改动 → 不写覆盖
+      const base = builtin[k] ? norm4(builtin[k]) : null;
+      const same = base && Math.abs(base[0]-pi) < 1e-9 && Math.abs(base[1]-po) < 1e-9
+        && Math.abs(base[2]-pcr) < 1e-9 && Math.abs(base[3]-pcw) < 1e-9;
       if(builtin[k] && same) continue;   // 未改动的内置 → 不写覆盖
-      ov[k] = [pi, po];
+      ov[k] = [pi, po, pcr, pcw];
     }
     return ov;
   }
@@ -2261,14 +2388,19 @@ async function loadCompare(){
   const end = state.dates.length ? state.dates[state.dates.length - 1] : todayStr();
   const endD = new Date(end + "T00:00:00");
   const startD = new Date(endD.getTime() - (cmpDays - 1) * 86400000);
-  const iso = d => d.toISOString().slice(0, 10);
+  const iso = localDateStr;  // 本地时区日期；按 UTC 取日期会让东八区零点倒退一天（见 localDateStr 注释）
   const proj = ($("#cmpProject") && $("#cmpProject").value.trim()) || "";
   let url = "/api/ai-compare?start=" + iso(startD) + "&end=" + iso(endD);
   if(proj) url += "&project=" + encodeURIComponent(proj);
   const body = $("#cmpBody");
-  if(body) body.innerHTML = '<tr><td colspan="12"><div class="empty">正在加载对比数据…</div></td></tr>';
-  const d = await api(url);
-  renderCompare(d);
+  // 首次访问后端要现算整个区间（可能约 1 分钟），文案先给出耗时预期，避免用户以为卡死
+  if(body) body.innerHTML = '<tr><td colspan="12"><div class="empty">对比计算中，最长约需 1 分钟…</div></td></tr>';
+  try{
+    const d = await api(url);
+    renderCompare(d);
+  }catch(err){
+    if(body) body.innerHTML = '<tr><td colspan="12"><div class="empty">对比加载失败：' + esc(err.message || err) + '</div></td></tr>';
+  }
 }
 function renderCompare(d){
   const meta = $("#cmpMeta");
@@ -2569,13 +2701,14 @@ function renderAiSessions(s){
   html += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 4px">'+
     aiStatCard("消息", t.turns)+
     aiStatCard("对话轮次", t.rounds, "user→assistant 配对")+
-    aiStatCard("Token 进", t.tokens_in, "≈ 输入折算")+
-    aiStatCard("Token 出", t.tokens_out, "≈ 生成折算")+
-    aiStatCard("成本估算", fmtCost(t.cost_total), "USD · 模型定价估算")+
+    aiStatCard("Token 进", t.tokens_in, "含缓存读/写 · 优先真实用量")+
+    aiStatCard("Token 出", t.tokens_out, "优先真实用量 · 缺则折算")+
+    aiStatCard("成本估算", fmtCost(t.cost_total), "USD · 模型定价（含缓存价）")+
     (qs.sessions_scored
       ? aiStatCard("质量均分", qs.avg, qs.sessions_scored+' 个会话 · 启发式估算')
       : '')+
     '</div>';
+  html += '<div class="hint" style="margin-top:2px">口径：Token 优先取会话内真实用量（usage），未记录时按字符折算估算；「Token 进」已含缓存读/写。</div>';
   if(qs.sessions_scored){
     const dk = qs.grade_dist || {};
     const dkText = Object.keys(dk).map(g => (dk[g]?'<span style="display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:rgba(168,85,247,.10);color:var(--accent);margin:0 4px 2px 0">'+esc(g)+' '+dk[g]+'</span>':'')).join('');
@@ -2607,7 +2740,7 @@ function renderAiSessions(s){
   const convs = [...(t.conversations || [])].sort((a,b) => (b.quality_score||0) - (a.quality_score||0));
   if(convs.length){
     html += '<div style="margin-top:10px"><b style="font-size:13px">会话详情（本地 · 前 '+convs.length+'）</b>'+
-            '<span class="hint"> 轮次=完成一轮问答；Token 出=生成折算；质量=启发式估算</span></div>';
+            '<span class="hint"> 轮次=完成一轮问答；Token 出=优先真实用量、缺则按字符折算；质量=启发式估算</span></div>';
     html += '<div class="tbl-wrap"><table class="tbl"><thead><tr>'+
       '<th>工具</th><th>会话</th><th>模型</th><th>项目</th><th>轮次</th><th>消息</th><th>Token 出</th><th>质量</th><th>成本</th><th>时段</th></tr></thead><tbody>';
     for(const c of convs){

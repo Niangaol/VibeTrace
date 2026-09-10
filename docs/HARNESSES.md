@@ -63,18 +63,19 @@ VibeTrace 对一个 AI 工具的"监控"分三个独立维度，一个工具可�
 
 ### B · 会话深度统计（ai_sessions.collect）
 
-- 按 `_DEFAULT_PATHS`（ai_sessions.py:45）逐工具扫描候选目录，递归收集
-  `.json/.jsonl/.ndjson`（单文件 ≤20MB、每工具 ≤500 个文件）；
+- 按 `_DEFAULT_PATHS`（由 `tool_registry.TOOLS` 的 default_paths 生成）逐工具扫描
+  候选目录，递归收集 `.json/.jsonl/.ndjson`（单文件 ≤20MB、每工具文件数有上限）；
 - 通用字段启发式解析：时间戳/角色/内容/模型/项目/会话 ID 各有一组候选键名
   （`_TIME_KEYS`/`_ROLE_KEYS`/`_CONTENT_KEYS`/`_MODEL_KEYS`/`_PROJECT_KEYS`），
-  兼容大多数 JSON 结构；opencode 与 pi 有专用解析器；
+  兼容大多数 JSON 结构；opencode/pi/codex/dsh/zcode 有专用解析器（见 tool_registry）；
 - 轮次 = user→assistant 配对数；Token = CJK 1 字/Token、其余 4 字符/Token（进一法）；
 - 成本 = tokens_in×输入价 + tokens_out×输出价（USD/百万 Token，内置价目表可覆盖）；
 - 质量评分 = 提问含金量 0.35 + 返工(负向) 0.25 + 稳定性 0.2 + 上下文健康度 0.2。
 
 ### C · Web AI 会话（browser_history + web_ai_sessions）
 
-- 从浏览器历史按域名识别 11 组 Web AI 站点（`_WEB_AI_TOOLS`，ai_sessions.py:219）；
+- 从浏览器历史按域名识别 11 组 Web AI 站点（`_WEB_AI_TOOLS`，由
+  `tool_registry.TOOLS` 的 web_domains 生成）；
 - URL 模式匹配会话 ID（`/c/<id>`、`/chat/<id>`、`/conversation/<id>` 等 8 种模式 +
   `?c=<id>` 查询参数），同一会话 ID 的多次访问归并为一次会话并推断轮次。
 
@@ -82,10 +83,12 @@ VibeTrace 对一个 AI 工具的"监控"分三个独立维度，一个工具可�
 
 ## 自定义与扩展
 
-**添加/修改 B 维度的扫描路径**（工具装在非默认位置、或适配新工具）：
+### 不改代码：config 覆盖扫描路径
+
+工具装在非默认位置时，用 `ai_sessions.paths` 整体覆盖默认表（支持 ~ 与 %VAR% 展开）：
 
 ```json
-// config.json → ai_sessions.paths（整体覆盖默认表；支持 ~ 与 %VAR% 展开）
+// config.json → ai_sessions.paths
 "ai_sessions": {
   "paths": {
     "my-tool": ["D:/tools/my-tool/sessions", "%APPDATA%/MyTool"],
@@ -97,7 +100,25 @@ VibeTrace 对一个 AI 工具的"监控"分三个独立维度，一个工具可�
 只要新工具的会话文件是 JSON/JSONL 且字段命名常见（role/content/model/timestamp…），
 通用解析器即可直接工作，无需改代码。
 
-**添加 A 维度的识别关键词**：
+### 适配新工具：注册表流程（tool_registry.py）
+
+工具的目录/解析器/缓存豁免/指纹特判/Web 域名统一登记在
+`tool_registry.TOOLS`（每工具一条 `ToolSpec`，模块头有完整适配清单）：
+
+1. **加 ToolSpec**：在 `tool_registry.TOOLS` 插入一条记录，`default_paths` 填
+   默认会话目录（决定 B 维度扫描哪里）；纯网页 AI 只填 `web_domains`。
+2. **（可选）专用解析器**：会话格式特殊时在 `ai_sessions.py` 写
+   `_parse_<name>_file` 并登记进模块级 `PARSERS` 表，`ToolSpec.parser` 填该键名
+   （现有先例：codex/dsh/pi；SQLite 库走 `sqlite_file` 字段，zcode/opencode 先例）。
+3. **（可选）定价键**：往 `ai_sessions._DEFAULT_PRICING` 加模型单价（USD/百万 Token）。
+4. **（可选）A 维度计时关键词**：`config.default.json` 的 `ai_keywords` /
+   `ai_tool_names` 加进程关键词 → 显示名映射（与 `ToolSpec.display_name` 一致）。
+
+命名打通：`ToolSpec.aliases` 声明历史/进程侧叫法（如 pi_agent 的 "pi-agent"、"pi"），
+`tool_registry.resolve_tool()` 把两套命名归一到同一工具——工具对比页的前台分钟数
+（by_ai）与会话深度统计（collect）靠它 join 到同一行。
+
+**添加 A 维度的识别关键词**（不改代码时）：
 
 ```json
 // config.json（顶层，与 config.default.json 同名段深合并）
@@ -120,5 +141,5 @@ VibeTrace 对一个 AI 工具的"监控"分三个独立维度，一个工具可�
 - **B 维度是 best-effort**：第三方工具格式差异大、随版本变化，可能出现统计缺失；
   Token/成本为估算口径，非官方账单。
 - **A 维度为前台注意力口径**：后台挂机的会话不计时。
-- 工具更新频繁，若发现某工具路径变更导致统计缺失，欢迎提 issue 或 PR 补充
-  `_DEFAULT_PATHS`。
+- 工具更新频繁，若发现某工具路径变更导致统计缺失，欢迎提 issue 或 PR 在
+  `tool_registry.TOOLS` 里更新对应 `ToolSpec`。

@@ -16,7 +16,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
-import math
 import os
 import re
 import sys
@@ -25,6 +24,7 @@ import urllib.error
 import urllib.request
 
 import paths  # noqa: E402
+import metrics_util  # noqa: E402  统计辅助单一来源：熵/HHI/工具切换计数（纯函数，无业务依赖）
 import report  # noqa: E402
 import version  # noqa: E402
 
@@ -563,14 +563,8 @@ def rule_insights(agg: dict, config: dict, prev_agg: dict | None = None) -> list
 
     # ---- 工具切换频率 ----
     if len(sessions) >= 2:
-        ordered = sorted(sessions, key=lambda s: s.get("start") or "")
-        switch_count = 0
-        prev_tool = ordered[0].get("ai_tool") or ordered[0].get("term_tool") or ordered[0].get("app") or "未知"
-        for s in ordered[1:]:
-            cur_tool = s.get("ai_tool") or s.get("term_tool") or s.get("app") or "未知"
-            if cur_tool != prev_tool:
-                switch_count += 1
-            prev_tool = cur_tool
+        # 折成工具名序列再数相邻变化（共享实现，growth 侧同构循环已一并收敛）
+        switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(sessions))
         total_hours = total / 3600000.0 if total > 0 else 0.0
         if total_hours > 0:
             freq = switch_count / total_hours
@@ -776,21 +770,17 @@ def behavior_insights(agg: dict, config: dict | None = None) -> dict:
 
 
 def _shannon_entropy(counts: list[float]) -> float:
-    """计算 Shannon 熵（bits），用于模型多样性等。"""
-    total = sum(counts)
-    if total <= 0:
-        return 0.0
-    ent = 0.0
-    for c in counts:
-        if c > 0:
-            p = c / total
-            ent -= p * math.log2(p)
-    return round(ent, 3)
+    """计算 Shannon 熵（bits），用于模型多样性等（转发到 metrics_util，保测试兼容）。"""
+    return metrics_util.shannon_entropy(counts)
 
 
 def _hhi(shares: list[float]) -> float:
-    """赫芬达尔-赫希曼指数（HHI），用于项目/工具集中度。"""
-    return round(sum(s * s for s in shares), 4)
+    """赫芬达尔-赫希曼指数（HHI），用于项目/工具集中度（转发到 metrics_util）。
+
+    本模块口径：逐次结果保留 4 位小数（growth 是先累加原始值、最后取均值再舍入，
+    两者口径不同，故共享层 hhi() 不做舍入、由调用方各自处理）。
+    """
+    return round(metrics_util.hhi(shares), 4)
 
 
 def _project_shares(sessions: list[dict]) -> list[float]:

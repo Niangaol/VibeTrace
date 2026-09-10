@@ -280,3 +280,133 @@ def test_walk_files_sorts_shuffled_os_walk(tmp_path, monkeypatch):
     assert out == expected, f"乱序输入下输出应已排序且顺序固定，实际 {out}"
     assert out == ai_sessions._walk_files([str(root)]), "重复枚举应可复现"
     print("  [PASS] walk_files_sorts_shuffled_os_walk")
+
+
+# ---------------------------------------------------------------------------
+# v2.9 批作用域落点补全：tool_compare / growth / budget 逐日循环的指纹摊销
+# ---------------------------------------------------------------------------
+
+def test_compare_tools_amortizes_fingerprints(tmp_path, monkeypatch):
+    """compare_tools：N 天区间的逐日循环整体包进批作用域 → 指纹只算 1 次。
+
+    背景：/api/ai-compare 90 天区间曾逐日各走一遍目录树（真实大目录单次 ~2s）；
+    compare_tools 的逐日循环已包进 collect_fingerprint_batch（同 query.run_query 先例）。
+    """
+    import tool_compare  # noqa: E402
+
+    od = tmp_path / "opencode"
+    od.mkdir()
+    days = ["2099-12-01", "2099-12-02", "2099-12-03"]
+    with open(od / "sessions.jsonl", "w", encoding="utf-8") as fh:
+        for d in days:
+            fh.write(json.dumps({"timestamp": f"{d}T09:00:00", "role": "user",
+                                 "content": "hi", "model": "m1",
+                                 "cwd": "/repo/demo"}) + "\n")
+            fh.write(json.dumps({"timestamp": f"{d}T09:05:00", "role": "assistant",
+                                 "content": "```\nx\n```", "model": "m1",
+                                 "cwd": "/repo/demo"}) + "\n")
+    cfg = {"ai_sessions": {"enabled": True, "paths": {"opencode": [str(od)]}},
+           "data_root": str(tmp_path)}
+    ai_sessions.invalidate_collect_cache()
+
+    calls = {"n": 0}
+    real_fp = ai_sessions._paths_fingerprint
+
+    def counting(tp):
+        calls["n"] += 1
+        return real_fp(tp)
+
+    monkeypatch.setattr(ai_sessions, "_paths_fingerprint", counting)
+
+    try:
+        out = tool_compare.compare_tools(days, str(tmp_path), cfg)
+        # 摊销：3 天只算 1 次指纹（批外逐日现算应为 3 次）
+        assert calls["n"] == 1, f"3 天区间应只遍历一次目录树，实际 {calls['n']}"
+        # 语义不变：三天的会话都被聚合计入（每天 1 个会话详情）
+        assert out["days"] == 3
+        oc = next(t for t in out["tools"] if t["tool"] == "opencode")
+        assert int(oc.get("sessions") or 0) == 3, oc
+        assert int(oc.get("user_messages") or 0) == 3, oc
+    finally:
+        # 清场必须在 finally：断言失败跳过清场会污染后续用例的 collect 缓存
+        ai_sessions.invalidate_collect_cache()
+
+
+def test_growth_snapshot_amortizes_fingerprints(tmp_path, monkeypatch):
+    """growth_snapshot：「分组 → 逐周聚合」整段包进批作用域 → 全量/增量都摊销到 1 次。
+
+    背景：周聚合对每周逐日 collect（_aggregate_week / _merge_incremental 两条路径），
+    多周 × 多日曾反复全树扫盘；git 子进程调用的次数与位置不受 batch 影响。
+    """
+    import datetime  # noqa: E402
+    import growth  # noqa: E402
+
+    od = tmp_path / "opencode"
+    od.mkdir()
+    base = datetime.date(2026, 6, 1)
+    base -= datetime.timedelta(days=base.weekday())  # 对齐到周一 → 5 天同一 ISO 周
+    days = [(base + datetime.timedelta(days=i)).isoformat() for i in range(5)]
+    cfg = {"ai_sessions": {"enabled": True, "paths": {"opencode": [str(od)]}},
+           "data_root": str(tmp_path), "growth": {"enabled": True}}
+    ai_sessions.invalidate_collect_cache()
+
+    def mk_day(d):
+        os.makedirs(os.path.join(str(tmp_path), d), exist_ok=True)
+        with open(od / "sessions.jsonl", "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"timestamp": f"{d}T09:00:00", "role": "user",
+                                 "content": "hi", "model": "m1",
+                                 "cwd": "/repo/demo"}) + "\n")
+
+    calls = {"n": 0}
+    real_fp = ai_sessions._paths_fingerprint
+
+    def counting(tp):
+        calls["n"] += 1
+        return real_fp(tp)
+
+    monkeypatch.setattr(ai_sessions, "_paths_fingerprint", counting)
+
+    try:
+        # 全量路径：3 天成周（min_days_per_week=3），逐日 collect 只算 1 次指纹
+        for d in days[:3]:
+            mk_day(d)
+        out1 = growth.growth_snapshot(str(tmp_path), cfg)
+        assert calls["n"] == 1, f"全量 3 天聚合应只遍历一次目录树，实际 {calls['n']}"
+        assert len(out1["weeks"]) == 1 and out1["weeks"][0]["days"] == 3, out1["weeks"]
+        assert out1["source"] == "fresh"
+
+        # 增量路径：同周追加 2 天 → 只重算新增天，指纹仍摊销到 1 次
+        calls["n"] = 0
+        for d in days[3:]:
+            mk_day(d)
+        out2 = growth.growth_snapshot(str(tmp_path), cfg)
+        assert calls["n"] == 1, f"增量 2 天聚合应只遍历一次目录树，实际 {calls['n']}"
+        assert len(out2["weeks"]) == 1 and out2["weeks"][0]["days"] == 5, out2["weeks"]
+    finally:
+        # 清场必须在 finally：断言失败跳过清场会污染后续用例的 collect 缓存
+        ai_sessions.invalidate_collect_cache()
+
+
+def test_agg_cache_capacity_holds_full_heatmap_range(tmp_path):
+    """report._AGG_CACHE_MAX 应为 128：84 天热力图/月报逐日聚合互不驱逐。
+
+    背景：旧值 16 时，84 天区间的逐日 aggregate 互相挤掉 LRU 条目，
+    相邻步骤对同一天的重复聚合全部落空（缓存形同虚设）。
+    """
+    import report  # noqa: E402
+
+    assert report._AGG_CACHE_MAX == 128
+    report._agg_cache.clear()
+    root = str(tmp_path)
+    days = [f"2099-07-{i:02d}" for i in range(1, 21)]  # 20 天 > 旧容量 16
+    for d in days:
+        day_dir = os.path.join(root, d)
+        os.makedirs(day_dir, exist_ok=True)
+        with open(os.path.join(day_dir, "usage.jsonl"), "w", encoding="utf-8") as fh:
+            fh.write("")
+    for d in days:
+        report.aggregate(d, root)
+    # 20 个单日聚合应全部驻留（旧容量 16 时最早 4 天已被驱逐）
+    assert len(report._agg_cache) == 20, len(report._agg_cache)
+    assert (days[0], root) in report._agg_cache, "最早的一天不应被驱逐"
+    report._agg_cache.clear()

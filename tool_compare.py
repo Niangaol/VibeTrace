@@ -24,14 +24,15 @@ sessions/rounds/quality；前台 minutes 按 usage 会话 title/app/exe 模糊�
 from __future__ import annotations
 
 import datetime
-import math
 from typing import Any
 
 import ai_sessions  # 只读复用（collect / quality_grade）
+import metrics_util  # 统计辅助单一来源：熵/HHI/维度合并/等级名（纯函数，无业务依赖）
 import report  # 只读复用（aggregate → by_ai / sessions）
+import tool_registry  # 只读复用（resolve_tool：两套工具命名的 join 收敛）
 
 # ---------------------------------------------------------------------------
-# 默认配置（读 config.tool_compare；风格对齐 git_insights.git_config git_insights.py:37）
+# 默认配置（读 config.tool_compare；风格对齐 git_insights.git_config）
 # ---------------------------------------------------------------------------
 _DEFAULT_COMPARE = {
     "enabled": True,
@@ -47,15 +48,16 @@ _NOTICE = (
     "与深度漏斗（tokens/cost/产出）口径不同。"
 )
 
-# 汇总求和的工具统计字段（对齐 ai_sessions._empty_tool_stats ai_sessions.py:852）
+# 汇总求和的工具统计字段（对齐 ai_sessions._empty_tool_stats 的字段集）
 _SUM_KEYS = (
     "files", "turns", "rounds", "user_messages", "assistant_messages",
     "generated_lines", "generated_chars", "tokens_in", "tokens_out",
-    "tokens_total", "cost_in", "cost_out", "cost_total",
+    "tokens_total", "tokens_input_fresh", "tokens_cache_read", "tokens_cache_write",
+    "cost_in", "cost_out", "cost_total",
 )
 
-# 会话质量分档（对齐 ai_sessions._GRADE_NAMES ai_sessions.py:617）
-_GRADE_NAMES = ("优", "良", "中", "待优化")
+# 会话质量分档（对齐 ai_sessions._GRADE_NAMES；两者同源于 metrics_util.GRADE_NAMES）
+_GRADE_NAMES = metrics_util.GRADE_NAMES
 
 
 def compare_config(config: dict) -> dict:
@@ -124,6 +126,7 @@ def _project_row(stats: dict, project: str) -> dict:
     bp = stats.get("by_project") or {}
     matched = [k for k in bp if _fuzzy_match(needle, k)]
     turns = tokens_in = tokens_out = tokens_total = 0
+    fresh = cache_read = cache_write = 0
     cost_in = cost_out = cost_total = 0.0
     for k in matched:
         e = bp[k]
@@ -131,6 +134,10 @@ def _project_row(stats: dict, project: str) -> dict:
         tokens_in += int(e.get("tokens_in") or 0)
         tokens_out += int(e.get("tokens_out") or 0)
         tokens_total += int(e.get("tokens_total") or 0)
+        # 缓存三分项 v2.9+ 新增：旧 by_project 条目缺键时 .get 记 0
+        fresh += int(e.get("tokens_input_fresh") or 0)
+        cache_read += int(e.get("tokens_cache_read") or 0)
+        cache_write += int(e.get("tokens_cache_write") or 0)
         cost_in += float(e.get("cost_in") or 0)
         cost_out += float(e.get("cost_out") or 0)
         cost_total += float(e.get("cost_total") or 0)
@@ -144,6 +151,9 @@ def _project_row(stats: dict, project: str) -> dict:
     row["tokens_in"] = tokens_in
     row["tokens_out"] = tokens_out
     row["tokens_total"] = tokens_total
+    row["tokens_input_fresh"] = fresh
+    row["tokens_cache_read"] = cache_read
+    row["tokens_cache_write"] = cache_write
     row["cost_in"] = cost_in
     row["cost_out"] = cost_out
     row["cost_total"] = cost_total
@@ -154,30 +164,50 @@ def _project_row(stats: dict, project: str) -> dict:
 
 
 def _project_minutes(agg: dict | None, project: str, tool: str) -> float:
-    """project 模式下前台分钟数：usage 会话（ai_tool==tool）按 title/app/exe 模糊匹配求和。"""
+    """project 模式下前台分钟数：usage 会话按 title/app/exe 模糊匹配求和。
+
+    会话的 ai_tool 是进程侧显示名（如 "pi agent"），tool 是 collect 侧键（如
+    "pi_agent"）——经 tool_registry.resolve_tool 归一到同一 canonical 键再比对
+    （精确相等优先；解析不了的自定义工具仍按原名字符串精确匹配）。
+    """
+    want = tool_registry.resolve_tool(tool)
+    want_key = want.key if want is not None else None
     total_ms = 0
     for s in (agg or {}).get("sessions") or []:
-        if s.get("ai_tool") != tool:
-            continue
+        ai = s.get("ai_tool")
+        if ai != tool:  # 精确不等 → 尝试 canonical 归一（如 "claude code" ↔ "claude"）
+            spec_ai = tool_registry.resolve_tool(str(ai)) if ai else None
+            if not (want_key is not None and spec_ai is not None
+                    and spec_ai.key == want_key):
+                continue
         if _fuzzy_match(project, s.get("title")) or _fuzzy_match(project, s.get("app")) \
                 or _fuzzy_match(project, s.get("exe")):
             total_ms += int(s.get("duration_ms") or 0)
     return total_ms / 60000.0
 
 
+def _by_ai_minutes(by_ai: dict | None) -> dict[str, float]:
+    """把 by_ai（进程侧显示名 → 毫秒）归一到 canonical 工具键并合并。
+
+    同一工具在进程侧可能有多个显示名（如 "claude" 与 "claude code"、"pi agent"
+    与 "pi"），毫秒数须合并后再与 collect 侧工具行 join，否则 minutes 恒为 0。
+    解析不了的键保持原名（用户自定义工具仍按精确名匹配，行为不回退）。
+    """
+    out: dict[str, float] = {}
+    for name, ms in (by_ai or {}).items():
+        spec = tool_registry.resolve_tool(str(name))
+        key = spec.key if spec is not None else str(name)
+        out[key] = out.get(key, 0.0) + float(ms or 0)
+    return out
+
+
 def _merge_dim(target: dict, src: dict) -> None:
-    """把 src 维度聚合并入 target（镜像 ai_sessions._merge_dim ai_sessions.py:1029 语义）。"""
-    for key, e in (src or {}).items():
-        t = target.setdefault(key, {"turns": 0, "tokens_in": 0, "tokens_out": 0,
-                                    "tokens_total": 0, "cost_in": 0.0, "cost_out": 0.0,
-                                    "cost_total": 0.0})
-        t["turns"] += int(e.get("turns") or 0)
-        t["tokens_in"] += int(e.get("tokens_in") or 0)
-        t["tokens_out"] += int(e.get("tokens_out") or 0)
-        t["tokens_total"] += int(e.get("tokens_total") or 0)
-        t["cost_in"] += float(e.get("cost_in") or 0)
-        t["cost_out"] += float(e.get("cost_out") or 0)
-        t["cost_total"] += float(e.get("cost_total") or 0)
+    """把 src 维度聚合并入 target（转发到 metrics_util.merge_dim，保测试兼容）。
+
+    与 ai_sessions._merge_dim 同一实现：缓存三分项（tokens_input_fresh 等）用
+    .get 容错累加，旧结构 dict 没有这些键也不能炸（字段为 v2.9+ 新增，additive）。
+    """
+    metrics_util.merge_dim(target, src)
 
 
 def _merge_tool_stats(rows: list[dict]) -> dict:
@@ -185,7 +215,7 @@ def _merge_tool_stats(rows: list[dict]) -> dict:
 
     - `_SUM_KEYS` 逐项累加；任一行为 None 的字段（project 模式的 generated_*）保持 None
       （上游数据不可得，推导为对应派生指标 None，排最后）；
-    - `by_model`/`by_project` 按 `_merge_dim` 语义合并（ai_sessions.py:1029）；
+    - `by_model`/`by_project` 按 `_merge_dim`（= metrics_util.merge_dim）语义合并；
     - `conversations` extend 后先算 sessions/质量（全量口径），再按 turns 截断 top 20
       （与 collect 的展示截断对齐；sessions = 截断前会话条数，防长区间低估）。
     """
@@ -221,16 +251,8 @@ def _merge_tool_stats(rows: list[dict]) -> dict:
 
 
 def _shannon_entropy(counts: list[float]) -> float:
-    """计算 Shannon 熵（bits）。"""
-    total = sum(counts)
-    if total <= 0:
-        return 0.0
-    ent = 0.0
-    for c in counts:
-        if c > 0:
-            p = c / total
-            ent -= p * math.log2(p)
-    return round(ent, 3)
+    """计算 Shannon 熵（bits）（转发到 metrics_util.shannon_entropy，保测试兼容）。"""
+    return metrics_util.shannon_entropy(counts)
 
 
 def _derive_metrics(merged: dict, totals: dict) -> dict:
@@ -268,7 +290,12 @@ def _derive_metrics(merged: dict, totals: dict) -> dict:
     by_project = merged.get("by_project") or {}
     proj_shares = [float(v.get("turns") or 0) for v in by_project.values() if isinstance(v, dict)]
     total_proj = sum(proj_shares)
-    merged["focus_hhi"] = round(sum((s / total_proj) ** 2 for s in proj_shares), 4) if total_proj > 0 else None
+    # 共享 HHI：先归一化成占比再求平方和，逐次保留 4 位（与 insights._hhi 口径一致）
+    if total_proj > 0:
+        proj_norm = [s / total_proj for s in proj_shares]
+        merged["focus_hhi"] = round(metrics_util.hhi(proj_norm), 4)
+    else:
+        merged["focus_hhi"] = None
 
     share: dict[str, float] = {}
     for key, val in (("cost", cost), ("sessions", float(sessions)), ("tokens", float(tokens))):
@@ -302,7 +329,8 @@ def compare_tools(days: list[str], data_root: str, config: dict,
 
     流程：配置兜底 → 日期归一化（ValueError 上抛 400）→ 逐日 best-effort
     collect + aggregate（单日失败仅跳过该日）→ 按 tool 归并 _merge_tool_stats
-    → minutes（by_ai 毫秒 / 60000；project 模式按 title 匹配 usage 会话）
+    → minutes（by_ai 毫秒 / 60000，显示名经 tool_registry 归一并合并；
+    project 模式按 title 匹配 usage 会话）
     → min_sessions 过滤 → 全量 totals → _derive_metrics → _sort_tools → summary。
     """
     cfg = compare_config(config)
@@ -315,23 +343,29 @@ def compare_tools(days: list[str], data_root: str, config: dict,
 
     per_tool: dict[str, list[dict]] = {}
     minutes: dict[str, float] = {}
-    for day in days:
-        try:  # best-effort：单日任何源失败仅跳过，不拖垮整体（对齐 timeline 降级） 
-            col = ai_sessions.collect(day, config)
-        except Exception:  # noqa: BLE001
-            col = None
-        try:
-            agg = report.aggregate(day, data_root)
-        except Exception:  # noqa: BLE001
-            agg = None
-        by_ai = (agg or {}).get("by_ai") or {}
-        for tool, stats in ((col or {}).get("tools") or {}).items():
-            row = _project_row(stats, project) if project else stats
-            per_tool.setdefault(tool, []).append(row)
-            if project:
-                minutes[tool] = minutes.get(tool, 0.0) + _project_minutes(agg, project, tool)
-            else:
-                minutes[tool] = minutes.get(tool, 0.0) + float(by_ai.get(tool) or 0) / 60000.0
+    # 批作用域（v2.9 性能修复，同 query.run_query 先例）：整段逐日循环共享一次
+    # 目录指纹/枚举，N 天区间不再 N 次全树扫盘；批外/批内返回结果语义完全不变。
+    with ai_sessions.collect_fingerprint_batch():
+        for day in days:
+            try:  # best-effort：单日任何源失败仅跳过，不拖垮整体（对齐 timeline 降级）
+                col = ai_sessions.collect(day, config)
+            except Exception:  # noqa: BLE001
+                col = None
+            try:
+                agg = report.aggregate(day, data_root)
+            except Exception:  # noqa: BLE001
+                agg = None
+            by_ai = (agg or {}).get("by_ai") or {}
+            by_ai_ms = _by_ai_minutes(by_ai)
+            for tool, stats in ((col or {}).get("tools") or {}).items():
+                row = _project_row(stats, project) if project else stats
+                per_tool.setdefault(tool, []).append(row)
+                if project:
+                    minutes[tool] = minutes.get(tool, 0.0) + _project_minutes(agg, project, tool)
+                else:
+                    spec = tool_registry.resolve_tool(tool)
+                    key = spec.key if spec is not None else tool
+                    minutes[tool] = minutes.get(tool, 0.0) + by_ai_ms.get(key, 0.0) / 60000.0
 
     rows: list[dict] = []
     for tool, day_rows in per_tool.items():
