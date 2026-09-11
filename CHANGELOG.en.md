@@ -8,6 +8,11 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [Unreleased]
+
+### Fixed
+- **Tray single-click now opens the browser**: `open_dashboard` defaults to the system browser instead of the Electron desktop shell (single-clicking the tray icon no longer pops a standalone app window); the Electron shell is now opt-in via `USAGEMON_USE_ELECTRON=1` (the shell probes/starts the dashboard service itself). The legacy `USAGEMON_USE_BROWSER=1` switch matches the new default and is kept as a no-op for compatibility
+
 ## [2.9.4] - 2026-09-10
 
 > Theme: internal framework unification (tool_registry single source of truth + metrics_util shared stat helpers) + dashboard response-cache framework (TTL + stale-while-revalidate single-flight) + frontend robustness (error banner / date-change race protection / non-blocking loads) + AI coding heatmap (overview).

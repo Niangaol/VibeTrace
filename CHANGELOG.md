@@ -8,6 +8,11 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [Unreleased]
+
+### 修复
+- **单击托盘图标改开浏览器**：`open_dashboard` 默认改用系统浏览器打开仪表盘，不再优先 Electron 桌面壳（单击托盘图标不再弹独立应用窗口）；Electron 壳降为可选（`USAGEMON_USE_ELECTRON=1` 启用，壳内部自行探测/启动服务）。旧开关 `USAGEMON_USE_BROWSER=1` 与新默认语义一致，保留无操作兼容
+
 ## [2.9.4] - 2026-09-10
 
 > 主题：内部框架统一（tool_registry 工具注册表 + metrics_util 统计辅助单一来源）+ 仪表盘响应缓存框架（TTL + SWR 单飞）+ 前端健壮性（错误横幅 / 换日竞态保护 / 非阻塞加载）+ AI 编程热力图（概览）。

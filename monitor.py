@@ -621,10 +621,13 @@ def open_dashboard(data_root: str, port: int = 8765, view: str | None = None,
                    params: dict | None = None) -> None:
     """打开本地仪表盘（幂等）。
 
-    优先 Electron 桌面壳（独立应用窗口，不弹默认浏览器；壳内部自行
-    探测/启动仪表盘服务）；无壳时回退：端口空闲则后台起服务 + 开浏览器。
-    view 指定初始视图（overview / report / detail），为空用默认视图；
-    params 附加查询参数（如 {"update": "1"} 让设置页自动检查更新）。
+    默认用系统浏览器打开（轻量、零额外依赖）；USAGEMON_USE_ELECTRON=1 时改用
+    Electron 桌面壳（独立应用窗口，不弹默认浏览器；壳内部自行探测/启动仪表盘
+    服务）。v2.9.5 起默认反转：此前 Electron 壳优先，单击托盘图标总弹独立窗口，
+    现浏览器优先更轻量，Electron 作为可选。旧变量 USAGEMON_USE_BROWSER=1 曾
+    强制浏览器，与新默认一致，保留无操作兼容。view 指定初始视图
+    （overview / report / detail），为空用默认视图；params 附加查询参数
+    （如 {"update": "1"} 让设置页自动检查更新）。
     """
     import socket
     import webbrowser
@@ -638,8 +641,9 @@ def open_dashboard(data_root: str, port: int = 8765, view: str | None = None,
     if query:
         url += "?" + "&".join(query)
 
-    # 优先 Electron 壳（USAGEMON_USE_BROWSER=1 可强制回退浏览器，调试用）
-    if os.environ.get("USAGEMON_USE_BROWSER") != "1":
+    # Electron 桌面壳改为可选（USAGEMON_USE_ELECTRON=1 启用）：默认浏览器打开，
+    # 单击托盘图标不再弹独立 Electron 窗口（v2.9.5 行为反转）。
+    if os.environ.get("USAGEMON_USE_ELECTRON") == "1":
         shell = _find_electron_shell()
         if shell:
             try:

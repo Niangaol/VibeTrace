@@ -166,7 +166,8 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 | `DATA_ROOT` | `config.json` `data_root` | data root override |
 | `PORT` | `8765` | dashboard port |
 | `PYTHON` | auto-detected | Python used by Electron shell / launcher |
-| `USAGEMON_USE_BROWSER` | unset | `=1` forces browser for the dashboard (falls back from Electron shell) |
+| `USAGEMON_USE_ELECTRON` | unset | `=1` opens the dashboard in the Electron desktop shell (default: system browser) |
+| `USAGEMON_USE_BROWSER` | unset | legacy switch, kept for compatibility: same as the new default (browser) |
 
 ### Access
 
