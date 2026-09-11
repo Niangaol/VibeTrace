@@ -27,6 +27,7 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 ### Tests (2.9.4)
 - New response-cache contract tests (SWR stale-hit / background refresh / error-not-cached / 8-way concurrent single-flight), semantic-date 400, frontend wiring expansion, token-cache fixes, tool_registry resolution
+- Fixed the dsh integration test for CI environments without zstandard: since v2.9.3 dsh sessions go through the dedicated zstd parser, the plain-JSONL fallback can no longer be parsed generically; the test now asserts the documented degrade-to-empty behavior (cursor only). CI test deps now install zstandard so the real zstd path is covered
 - Full regression 730 passed, 0 failed
 
 ## [2.9.3] - 2026-08-31

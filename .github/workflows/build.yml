@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install test dependencies
-        run: pip install coverage pytest
+        run: pip install coverage pytest zstandard
       - name: Run tests with coverage (layered pytest suite)
         run: coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
         timeout-minutes: 10

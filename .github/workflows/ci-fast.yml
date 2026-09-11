@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11' }
-      - run: pip install coverage pytest
+      - run: pip install coverage pytest zstandard
       - name: Run layered tests
         run: coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance -q
         timeout-minutes: 10

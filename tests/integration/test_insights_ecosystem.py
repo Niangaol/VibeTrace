@@ -782,11 +782,21 @@ def test_ai_sessions_more_tools():
         }
     }
     result = ai_sessions.collect(day, cfg)
-    check("cursor" in result["tools"] and "dsh" in result["tools"],
-          "识别 Cursor 与 DSH", str(list(result["tools"].keys())))
-    check(result["total"]["turns"] == 4, "共 4 条消息", str(result["total"]))
-    check(result["tools"]["cursor"]["generated_lines"] == 2, "Cursor 生成 2 行",
-          str(result["tools"]["cursor"]))
+    # v2.9.3 起 dsh 会话走专用 zstd 解析器（tool_registry parser="dsh"）：
+    # - 装有 zstandard：明文兜底文件不参与，写真实压缩会话并断言 dsh 被识别；
+    # - 未装（CI 精简环境）：按设计优雅降级为空（该工具统计记 0），只断言 cursor。
+    if ai_sessions._HAS_ZSTD:
+        check("cursor" in result["tools"] and "dsh" in result["tools"],
+              "识别 Cursor 与 DSH", str(list(result["tools"].keys())))
+        check(result["total"]["turns"] == 4, "共 4 条消息", str(result["total"]))
+        check(result["tools"]["cursor"]["generated_lines"] == 2, "Cursor 生成 2 行",
+              str(result["tools"]["cursor"]))
+    else:
+        check("cursor" in result["tools"] and "dsh" not in result["tools"],
+              "识别 Cursor；DSH 无 zstd 时降级为空", str(list(result["tools"].keys())))
+        check(result["total"]["turns"] == 2, "共 2 条消息（仅 Cursor）", str(result["total"]))
+        check(result["tools"]["cursor"]["generated_lines"] == 2, "Cursor 生成 2 行",
+              str(result["tools"]["cursor"]))
     shutil.rmtree(tmp, ignore_errors=True)
 
 def test_ai_sessions_phase1():

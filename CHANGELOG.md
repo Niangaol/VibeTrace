@@ -27,6 +27,7 @@
 
 ### 测试（2.9.4）
 - 新增响应缓存契约（SWR 过期回旧值 / 后台刷新 / 错误不入缓存 / 8 路并发单飞）、语义日期 400、前端 wiring 扩充、token cache 修复、tool_registry 解析
+- 修复 CI 无 zstandard 环境的 dsh 集成测试：v2.9.3 起 dsh 走专用 zstd 解析器，明文兜底文件无法再被通用解析，测试按「缺失时降级为空」设计断言（仅 cursor）；CI 测试依赖补装 zstandard 以覆盖真实 zstd 路径
 - 全量回归 730 passed, 0 failed
 
 ## [2.9.3] - 2026-08-31
