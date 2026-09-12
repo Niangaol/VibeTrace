@@ -8,10 +8,28 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
-## [Unreleased]
+## [2.9.5] - 2026-09-12
+
+> Theme: token-semantics and cost corrections (fresh input + cache shown separately, cache billed at official discount rates) + overview "Advice" panel (opt-in) + unified heatmaps (trend view as the source of truth) + config.json untracked (prevents leaking secrets).
+
+### Added
+- **Overview "Advice" panel (opt-in, disabled by default)**: new `advice.py` (stdlib only, offline, read-only) distils **actionable short suggestions** from the day's data, each backed by a number; it reuses existing metrics (`insights.activitywatch_metrics`, `goals.today_progress`) instead of inventing a parallel rule engine. First rules: long unbroken deep work → take a break; late-night activity → sleep hygiene; cost anomaly vs the 7-day average; high cache share → positive note; high unknown-model share → complete model info; long coding with no AI session → try AI assistance; low project focus → focus tip; goal gap. Config `advice.enabled` / `advice.max_items` (1-20, default 6); `GET /api/advice` (shared response-cache framework) + `POST /api/advice/settings`; non-blocking overview panel + settings toggle
+
+### Changed
+- **The two heatmaps now share one definition (trend view wins)**: the overview used `?tokens=1` (token heatmap, 28 days) while the trend view used the activity heatmap (84 days) — different metric *and* window. Both are now "total active time x last 84 days": same request, same field (`hourly_ms`), same renderer. The tokens variant's dedicated cache, startup warm-up thread and `tokens=1` parameter were removed (the overview heatmap was its only consumer)
+- **Token display split into "fresh input + cache"**: the overview's headline card now shows `tokens_input_fresh` (cache reads/writes listed separately) instead of `tokens_in` (which includes cache); the AI-session panel and the daily/weekly reports follow. API fields are unchanged (additive)
+- **Tray single-click opens the browser** (folding in the previous unreleased change): `open_dashboard` defaults to the system browser; the Electron shell is opt-in via `USAGEMON_USE_ELECTRON=1`; the legacy `USAGEMON_USE_BROWSER=1` is kept for compatibility
 
 ### Fixed
-- **Tray single-click now opens the browser**: `open_dashboard` defaults to the system browser instead of the Electron desktop shell (single-clicking the tray icon no longer pops a standalone app window); the Electron shell is now opt-in via `USAGEMON_USE_ELECTRON=1` (the shell probes/starts the dashboard service itself). The legacy `USAGEMON_USE_BROWSER=1` switch matches the new default and is kept as a no-op for compatibility
+- **Cache is now billed at cache prices (models without an explicit cache price no longer pay full input rate)**: 119 of the 157 built-in pricing entries are 2-tuples, so cache reads/writes were billed at the input price (the source comment called this a "conservative overestimate"). Cache-heavy agent workflows can have cache reads at **98%** of input, inflating cost several-fold (measured 2026-09-10: glm-5.3 reported $12.65 where official cache pricing implies roughly $1.2-$2.9). Vendors with verified official hit discounts are now applied: Zhipu GLM-5.3 = 25% (2 CNY hit / 8 CNY input), GLM-5.3-Flash = 20% (cached $0.03 / input $0.15), Alibaba Model Studio qwen implicit cache = 20%. Models not covered keep the input-price fallback and are labelled an **upper-bound estimate** (no invented discounts)
+- **Token semantics caused a misleading headline**: providers' `input_tokens` already includes cache reads, so showing `tokens_in` as the headline produced "100M tokens in a day" (measured 2026-09-10: 104,162,189 total of which 102,084,160 was cache reads; fresh input was only 2,070,682). Showing fresh input with cache broken out matches intuition
+- **config.json untracked**: it is runtime configuration written by the settings page and holds `data_root`, the dashboard token and the AI-insights `api_key`; while tracked it risked committing plaintext secrets to a public repo. Only the `config.default.json` template is kept (the installer already generates config.json when missing), plus a new `.gitignore` entry
+
+### Tests (2.9.5)
+- New `tests/unit/test_advice.py` (9 cases: each rule fires/does not fire, disabled empty state, max-items clamping, ordering) and `tests/api/test_advice_api.py` (3 cases: default-disabled empty state, invalid date 400, settings round-trip taking effect); frontend wiring gains advice-panel assertions
+- Pricing: 4-tuple cache prices and official ratio assertions, plus an end-to-end pin proving the discount actually reaches cost (test_token_cache_fixes.py)
+- Heatmaps: unified-definition contract test (only `hourly_ms`; `tokens=1` no longer changes the result)
+- Report/frontend wording assertions updated; full regression **744 passed, 0 failed**
 
 ## [2.9.4] - 2026-09-10
 

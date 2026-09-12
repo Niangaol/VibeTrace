@@ -433,11 +433,19 @@ def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = Non
             return None
 
         out: list[str] = ["## AI 会话深度", ""]
-        # 有真实 usage（含缓存）时不再称「估算」；仅估算时保留原措辞
+        # 有真实 usage 时不再称「估算」；且入口径改为「新鲜输入（不含缓存）」，
+        # 缓存读/写单列（缓存密集型会话的 tokens_in 可达新鲜输入的数十倍，混在一起会误导）
         real_usage = int(total.get("tokens_from_usage") or 0) > 0
-        tok_label = "真实 usage（含缓存）" if real_usage else "Token 估算"
+        if real_usage:
+            tok_line = (f"真实 usage 入 {total.get('tokens_input_fresh', 0)}（不含缓存）/ "
+                        f"缓存读 {total.get('tokens_cache_read', 0)} / "
+                        f"缓存写 {total.get('tokens_cache_write', 0)} / "
+                        f"出 {total.get('tokens_out', 0)}")
+        else:
+            tok_line = (f"Token 估算 进 {total.get('tokens_in', 0)} / "
+                        f"出 {total.get('tokens_out', 0)}")
         out.append(f"- 本地会话：消息 {total.get('turns', 0)} 条 / 对话轮次 {total.get('rounds', 0)} 轮，"
-                   f"{tok_label} 进 {total.get('tokens_in', 0)} / 出 {total.get('tokens_out', 0)}，"
+                   f"{tok_line}，"
                    f"成本估算 {ai_sessions._fmt_cost(total.get('cost_total', 0))}")
         qs = total.get("quality_summary") or {}
         if qs.get("sessions_scored"):
@@ -486,7 +494,9 @@ def _ai_sessions_daily(date_str: str, data_root: str, max_rows: int | None = Non
             ] for s in web["sessions"][: (max_rows or 10)]]
             out.append(_md_table(["Web 工具", "会话 ID", "标题", "访问次数"], rows))
             out.append("")
-        tok_note = ("Token 优先取会话内真实 usage（含缓存），无 usage 的消息按长度折算估算"
+        tok_note = ("Token 优先取会话内真实 usage；入口径为新鲜输入（不含缓存），"
+                    "缓存读/写单列，成本按各模型缓存单价计（未标缓存单价的模型按输入价，"
+                    "即成本上限估算）；无 usage 的消息按长度折算估算"
                     if real_usage else "Token 为长度折算的估算值")
         out.append(f"注：{tok_note}；成本为按模型定价表（USD/百万 Token）的估算，"
                    "可用 config 的 ai_sessions.costs.model_pricing 自定义单价；对话轮次为消息序列中 "
@@ -563,7 +573,7 @@ def _ai_cost_ledger_md(days: list[str], data_root: str, label: str = "周度",
 
         out: list[str] = [f"## AI 成本账本（{label}）", ""]
         out.append(f"- 会话消息 {acc['turns']} 条 / 对话轮次 {acc['rounds']} 轮，"
-                   f"Token 估算 进 {acc['tokens_in']} / 出 {acc['tokens_out']}，"
+                   f"Token 进 {acc['tokens_in']}（含缓存读/写）/ 出 {acc['tokens_out']}，"
                    f"成本估算 {ai_sessions._fmt_cost(acc['cost'])}")
         grouped = [("按模型", acc["by_model"]), ("按项目", acc["by_project"]), ("按工具", acc["by_tool"])]
         for title, bucket in grouped:

@@ -131,7 +131,7 @@ def _write_ai_report_env(root: str, sess_dir: str, *, token_est: bool = True) ->
 
 
 def test_ai_sessions_daily_real_usage_wording(tmp_path):
-    """消息带真实 usage（含缓存）时，文案称「真实 usage（含缓存）」而非「估算」。"""
+    """消息带真实 usage 时：称「真实 usage」而非「估算」，且入口径不含缓存、缓存单列。"""
     root = tmp_path / "rep_real"
     sess = root / "claude"
     sess.mkdir(parents=True)
@@ -147,9 +147,10 @@ def test_ai_sessions_daily_real_usage_wording(tmp_path):
     _write_ai_report_env(str(root), str(sess))
     out = report._ai_sessions_daily(day, str(root))
     assert out, "有当日会话数据时章节应生成（非 None）"
-    assert "真实 usage（含缓存）" in out
-    assert "Token 估算 进" not in out          # 不得再称「估算」
-    assert "Token 优先取会话内真实 usage（含缓存）" in out
+    assert "真实 usage 入 10（不含缓存）" in out     # 入口径 = 新鲜输入，不含缓存
+    assert "缓存读 900" in out and "缓存写 50" in out   # 缓存三分项单列
+    assert "Token 估算 进" not in out                  # 不得再称「估算」
+    assert "Token 优先取会话内真实 usage" in out
     print("  [PASS] ai_sessions_daily_real_usage_wording")
 
 

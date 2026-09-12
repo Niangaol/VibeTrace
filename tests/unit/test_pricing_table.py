@@ -2,8 +2,11 @@
 """tests/unit/test_pricing_table.py — 定价表查询测试（50+ case，精确匹配 + 子串 fallback）。
 
 Phase 1+2 起 _model_price 统一返回四元组 (in, out, cache_read, cache_write)：
-2 元组表值自动补 (in, in)（未配缓存档按输入价计，保守高估）；未命中 (0,0,0,0)。
-内置 claude/deepseek/gpt-5.x/codex 系为显式 4 元组缓存档。
+- 4 元组表值原样；3 元组补缓存写 = 输入价；
+- 2 元组的 cache_read 取该供应商官方缓存命中折扣比（v2.9.5：智谱 GLM-5.3 25%、
+  GLM-5.3-Flash 20%、阿里云百炼 qwen 系隐式缓存 20%）；无官方口径的模型按输入价计
+  （即成本上限估算，不臆造折扣）；
+- 未命中 (0,0,0,0)。内置 claude/deepseek/gpt-5.x/codex 系为显式 4 元组缓存档。
 """
 
 from __future__ import annotations
@@ -360,9 +363,10 @@ def test_model_price_gemini_substring():
 # ---------------------------------------------------------------------------
 def test_model_price_qwen_substring():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 1.6, 1.6)
-    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.26, 0.26)
-    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.3, 0.3)
+    # qwen 系走阿里云百炼隐式缓存官方折扣：命中价 = 输入价 20%
+    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 0.32, 1.6)
+    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.052, 0.26)
+    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.06, 0.3)
     print("  [PASS] qwen_substring")
 
 
@@ -373,7 +377,10 @@ def test_model_price_glm_substring():
     table = ai_sessions._pricing_table({})
     assert ai_sessions._model_price(table, "glm-5") == (0.6, 1.92, 0.6, 0.6)
     assert ai_sessions._model_price(table, "glm-4") == (0.5, 1.4, 0.5, 0.5)
-    assert ai_sessions._model_price(table, "glm-5.3-flash") == (0.075, 0.25, 0.075, 0.075)
+    # glm-5.3-flash 官方缓存命中价 = 输入价 20%（Z.ai: cached $0.03 / input $0.15）
+    assert ai_sessions._model_price(table, "glm-5.3-flash") == (0.075, 0.25, 0.015, 0.075)
+    # glm-5.3 官方缓存命中价 = 输入价 25%（智谱: 2 元 / 8 元）
+    assert ai_sessions._model_price(table, "glm-5.3") == (1.4, 4.4, 0.35, 1.4)
     assert ai_sessions._model_price(table, "glm-5.2") == (0.966, 3.036, 0.966, 0.966)
     print("  [PASS] glm_substring")
 
@@ -699,9 +706,9 @@ def test_pricing_table_file_dict_format(tmp_path):
 # ---------------------------------------------------------------------------
 def test_model_price_qwen_variants():
     table = ai_sessions._pricing_table({})
-    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.3, 0.3)
-    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.26, 0.26)
-    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 1.6, 1.6)
+    assert ai_sessions._model_price(table, "qwen-turbo") == (0.3, 0.6, 0.06, 0.3)
+    assert ai_sessions._model_price(table, "qwen-plus") == (0.26, 0.78, 0.052, 0.26)
+    assert ai_sessions._model_price(table, "qwen-max") == (1.6, 6.4, 0.32, 1.6)
     print("  [PASS] qwen_variants")
 
 

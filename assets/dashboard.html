@@ -493,6 +493,10 @@
         <h2>每日目标 <span class="hint" id="ovGoalsStreak"></span></h2>
         <div id="ovGoalsBody"></div>
       </div>
+      <div class="panel" id="ovAdvice" style="display:none">
+        <h2>建议 <span class="hint" id="ovAdviceHint">基于当日数据 · 本地规则 · 不联网</span></h2>
+        <div id="ovAdviceBody"></div>
+      </div>
       <div class="panel" id="qPanel" style="display:none">
         <h2>快速提问 <span class="hint">固定模板·本地计算·不调用大模型</span></h2>
         <div class="controls">
@@ -507,7 +511,7 @@
       </div>
       <div class="grid">
         <div class="panel"><h2>今日应用 Top 10</h2><div id="ovApps"></div></div>
-        <div class="panel"><h2>AI 编程热力图（24 小时 × 最近 28 天）<span class="hint">行=小时 · 列=日期 · 所有 agent 工具 Token 用量</span></h2>
+        <div class="panel"><h2>活跃热力图（24 小时 × 最近 84 天）<span class="hint">行=小时 · 列=日期</span></h2>
           <div id="ovAiHeatmap"></div>
           <div class="hm-legend">少 <span class="sw" style="background:var(--hm-1)"></span><span class="sw" style="background:var(--hm-2)"></span><span class="sw" style="background:var(--hm-3)"></span><span class="sw" style="background:var(--hm-4)"></span><span class="sw" style="background:var(--hm-5)"></span> 多</div>
         </div>
@@ -631,7 +635,7 @@
           <span class="hint" id="cmpMeta" style="color:var(--faint);font-size:11.5px"></span>
         </div>
         <div class="tbl-wrap"><table class="tbl">
-          <thead><tr><th>工具</th><th>会话</th><th>轮次</th><th>分钟</th><th>Token</th><th>成本</th><th>字符/美元</th><th>质量均分</th><th>成本占比</th><th>模型多样熵</th><th>提示效率</th><th>项目集中度</th></tr></thead>
+          <thead><tr><th>工具</th><th>会话</th><th>轮次</th><th>分钟</th><th title="输入（含缓存读/写）+ 输出">Token</th><th>成本</th><th>字符/美元</th><th>质量均分</th><th>成本占比</th><th>模型多样熵</th><th>提示效率</th><th>项目集中度</th></tr></thead>
           <tbody id="cmpBody"></tbody>
         </table></div>
         <div class="set-note" id="cmpNotice" style="margin-top:10px"></div>
@@ -778,6 +782,28 @@
         <div class="controls" style="margin-top:12px">
           <button class="btn primary" id="btnSaveGoals">保存目标设置</button>
           <span class="set-note" id="goalSaveNote"></span>
+        </div>
+      </div>
+      <div class="set-group">
+        <h3>💡 建议（可选功能）</h3>
+        <div class="desc">开启后，概览页显示当日「建议」卡片：由本地规则从使用数据里提炼，
+          每条都带数字依据（如连续深度工作过久、成本异常、缓存占比、目标差距等）。
+          纯本地计算、不联网、不调用大模型。</div>
+        <div class="controls" style="margin:10px 0 8px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="adviceEnabled" style="width:auto">
+            <b>启用建议栏位</b>
+          </label>
+        </div>
+        <div class="ai-fields">
+          <label style="display:block;margin:8px 0">最多显示条数
+            <input type="number" id="adviceMaxItems" min="1" max="20" step="1" value="6" style="width:min(180px,100%);margin-top:4px">
+          </label>
+          <div class="hint">1-20 条，默认 6；按重要程度排序（警示在前）。</div>
+        </div>
+        <div class="controls" style="margin-top:12px">
+          <button class="btn primary" id="btnSaveAdvice">保存建议设置</button>
+          <span class="set-note" id="adviceSaveNote"></span>
         </div>
       </div>
       <div class="set-group">
@@ -1383,13 +1409,12 @@ async function loadOverview(){
   $("#ovCats").innerHTML = skeleton(6);
   $("#ovCats").innerHTML = statRows(a.by_category, fmtMs);   // 类别：不启用图标
   $("#ovApps").innerHTML = statRows(a.by_app, fmtMs, {icon:true, limit:10});
-  // AI 编程热力图（28 天 × 24 小时；所有已知 agent 工具 Token 用量）。
-  // tokens=1 才跑逐日 AI 会话统计（服务启动时已后台预热；未就绪则等待预热结果）——
+  // 活跃热力图（84 天 × 24 小时）：与趋势视图同一口径、同一数据源（总活跃时长）。
   // 刻意不 await：绝不阻塞概览其他面板，热力图就绪后自行填充。
-  $("#ovAiHeatmap").innerHTML = '<div class="empty">Token 统计进行中…（服务启动后首次约需 1 分钟，之后秒开）</div>';
-  api("/api/heatmap?days=28&tokens=1").then(hmAi=>{
+  $("#ovAiHeatmap").innerHTML = skeleton(20);
+  api("/api/heatmap?days=84").then(hm=>{
     if (state.day !== day) return;  // 固定参数也防串轮：旧轮晚到不覆盖新面板
-    $("#ovAiHeatmap").innerHTML = heatmapHTML(hmAi.days, "hourly_tokens", fmtTok);
+    $("#ovAiHeatmap").innerHTML = heatmapHTML(hm.days, "hourly_ms", fmtMs);
   }).catch(()=>{ if (state.day !== day) return; $("#ovAiHeatmap").innerHTML = '<div class="empty">加载失败</div>'; });
   // AI 会话深度（始终开启，固定面板）
   $("#ovAiSessions").innerHTML = '<div class="empty">加载中…</div>';
@@ -1407,6 +1432,11 @@ async function loadOverview(){
     if (state.day !== day) return;
     renderGoalsPanel(gd);
   }).catch(()=>{ /* 目标接口失败则不显示面板 */ });
+  // v2.9.5：建议栏位（可选功能，未开启不显示面板）
+  api("/api/advice?date=" + day).then(ad=>{
+    if (state.day !== day) return;
+    renderAdvicePanel(ad);
+  }).catch(()=>{ /* 建议接口失败则不显示面板 */ });
   // 最近 14 天活跃趋势（单日数据失败/接口异常时降级显示，不影响其它面板）
   api("/api/days?n=14").then(days=>{
     if (state.day !== day) return;
@@ -1419,6 +1449,24 @@ async function loadOverview(){
       tcv.parentElement.insertAdjacentHTML("beforeend", '<div class="empty">趋势加载失败：' + esc(err.message || err) + '</div>');
     }
   });
+}
+
+/* ---------- 建议面板（v2.9.5，可选功能；未开启/无建议时隐藏） ---------- */
+function renderAdvicePanel(a){
+  const el = $("#ovAdvice");
+  if(!el) return;
+  if(!a || !a.enabled || !(a.items || []).length){ el.style.display = "none"; return; }
+  const col = lv => lv === "alert" ? "var(--danger)" : lv === "warn" ? "var(--warn)" : "var(--accent)";
+  const mark = lv => lv === "info" ? "i" : "!";
+  $("#ovAdviceBody").innerHTML = (a.items || []).map(it =>
+    '<div style="display:flex;gap:9px;margin:9px 0">' +
+      '<span style="flex:0 0 auto;width:18px;height:18px;border-radius:50%;display:flex;align-items:center;' +
+      'justify-content:center;font-size:11px;font-weight:700;color:#fff;background:' + col(it.level) + '">' +
+      esc(mark(it.level)) + '</span>' +
+      '<div><div style="font-size:12.5px">' + esc(it.title) + '</div>' +
+      '<div class="hint" style="margin-top:2px">' + esc(it.detail) + '</div></div>' +
+    '</div>').join("");
+  el.style.display = "";
 }
 
 /* ---------- 每日目标面板（v2.7，可选功能；未开启隐藏） ---------- */
@@ -1473,11 +1521,9 @@ function renderBudgetBanner(b){
     '<div class="bb-bar"><div style="width:' + pct + '%;background:' + col + '"></div></div>';
 }
 
-/* ---------- 热力图渲染（概览 AI 编程 Token 热力图 / 趋势总活跃热力图共用） ---------- */
-/* days: /api/heatmap 的 days 数组；field: "hourly_ms"（总活跃时长）| "hourly_tokens"
-   （全部已知 agent 工具 Token 用量）；fmt: 格子悬停数值格式化（fmtMs / fmtTok）。
-   色阶/图例/悬停共用同一套 --hm-* 设计令牌。 */
-const fmtTok = v => { v = Number(v) || 0; return v >= 1e6 ? (v / 1e6).toFixed(1) + "M" : v >= 1e3 ? (v / 1e3).toFixed(1) + "k" : String(v); };
+/* ---------- 热力图渲染（概览 / 趋势共用同一实现与同一数据源） ---------- */
+/* days: /api/heatmap 的 days 数组；field: 数值字段（当前统一 "hourly_ms" 总活跃时长）；
+   fmt: 格子悬停数值格式化（fmtMs）。色阶/图例/悬停共用同一套 --hm-* 设计令牌。 */
 function heatmapHTML(days, field, fmt){
   const maxH = Math.max(1, ...days.flatMap(d=>(d[field]||[])));
   const lvl = [
@@ -1768,7 +1814,37 @@ async function loadSettings(){
     }
   }
   loadGoalsSettings();
+  loadAdviceSettings();
 }
+/* ---------- 建议设置（v2.9.5，可选功能） ---------- */
+async function loadAdviceSettings(){
+  try{
+    const d = await api("/api/advice");
+    if(!d || d.enabled === undefined) return;
+    $("#adviceEnabled").checked = !!d.enabled;
+    if(d.max_items) $("#adviceMaxItems").value = d.max_items;
+  }catch(e){ /* 建议接口失败不打扰设置页 */ }
+}
+async function saveAdviceSettings(){
+  const note = $("#adviceSaveNote");
+  if(!note) return;
+  note.textContent = "保存中…";
+  note.style.color = "var(--dim)";
+  const payload = {
+    enabled: $("#adviceEnabled").checked,
+    max_items: parseInt($("#adviceMaxItems").value || "6", 10)
+  };
+  try{
+    await postJson("/api/advice/settings", payload);
+    note.textContent = "已保存。";
+    note.style.color = "var(--ok)";
+    if(state.loaded.overview){ state.loaded.overview = false; }
+  }catch(e){
+    note.textContent = "保存失败：" + e.message;
+    note.style.color = "var(--danger)";
+  }
+}
+
 /* ---------- 每日目标设置（v2.7，可选功能） ---------- */
 async function loadGoalsSettings(){
   try{
@@ -2701,14 +2777,16 @@ function renderAiSessions(s){
   html += '<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 4px">'+
     aiStatCard("消息", t.turns)+
     aiStatCard("对话轮次", t.rounds, "user→assistant 配对")+
-    aiStatCard("Token 进", t.tokens_in, "含缓存读/写 · 优先真实用量")+
+    aiStatCard("Token 入", t.tokens_input_fresh, "新鲜输入 · 不含缓存")+
+    ((t.tokens_cache_read||0) > 0 ? aiStatCard("缓存读", t.tokens_cache_read, "命中缓存 · 按缓存价计") : '')+
+    ((t.tokens_cache_write||0) > 0 ? aiStatCard("缓存写", t.tokens_cache_write, "写入缓存 · 按缓存价计") : '')+
     aiStatCard("Token 出", t.tokens_out, "优先真实用量 · 缺则折算")+
-    aiStatCard("成本估算", fmtCost(t.cost_total), "USD · 模型定价（含缓存价）")+
+    aiStatCard("成本估算", fmtCost(t.cost_total), "USD · 含缓存折扣价")+
     (qs.sessions_scored
       ? aiStatCard("质量均分", qs.avg, qs.sessions_scored+' 个会话 · 启发式估算')
       : '')+
     '</div>';
-  html += '<div class="hint" style="margin-top:2px">口径：Token 优先取会话内真实用量（usage），未记录时按字符折算估算；「Token 进」已含缓存读/写。</div>';
+  html += '<div class="hint" style="margin-top:2px">口径：「Token 入」为新鲜输入（不含缓存），缓存读/写单列——缓存命中按各模型缓存单价计费，未标缓存单价的模型按输入价计（即成本为上限估算）。Token 优先取会话内真实用量（usage），未记录时按字符折算估算。</div>';
   if(qs.sessions_scored){
     const dk = qs.grade_dist || {};
     const dkText = Object.keys(dk).map(g => (dk[g]?'<span style="display:inline-block;font-size:11px;padding:1px 8px;border-radius:999px;background:rgba(168,85,247,.10);color:var(--accent);margin:0 4px 2px 0">'+esc(g)+' '+dk[g]+'</span>':'')).join('');
@@ -3295,6 +3373,8 @@ function startApp(){
   if(themeBtnSettings) themeBtnSettings.onclick = cycleTheme;
   const btnGoals = $("#btnSaveGoals");
   if(btnGoals) btnGoals.onclick = saveGoalsSettings;
+  const btnAdvice = $("#btnSaveAdvice");
+  if(btnAdvice) btnAdvice.onclick = saveAdviceSettings;
   wirePricing();
   wireAiModule();
   wireUpdate();

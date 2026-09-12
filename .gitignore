@@ -66,3 +66,8 @@ baselines.json
 # 本地 AI CLI 工具在仓库内的工作产物（会话计划/插件状态），不入库
 .zcode/
 .video_agent/
+
+# 用户运行期配置（含 data_root / dashboard 口令 / AI insights 的 api_key 等敏感项）：
+# 仓库只维护模板 config.default.json，安装器在 config.json 缺失时自动从模板生成。
+# 历史版本曾跟踪 config.json —— 那会让设置页写入的明文密钥随提交公开，故取消跟踪。
+config.json

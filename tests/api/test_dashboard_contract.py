@@ -114,29 +114,32 @@ def test_api_insights_includes_time_saved(tmp_path):
         server.server_close()
 
 
-def test_api_heatmap_hourly_tokens(tmp_path):
-    """tokens=1 时 heatmap 响应带 hourly_tokens（无 AI 会话日为 24 个 0）；默认不带统计。"""
+def test_api_heatmap_unified_metric(tmp_path):
+    """热力图统一口径（v2.9.5）：概览与趋势同源，只返回 hourly_ms，不再有 tokens 变体。
+
+    回归：此前概览走 ?tokens=1 的逐日 ai_sessions.collect（hourly_tokens，28 天），
+    与趋势（hourly_ms，84 天）不一致；现统一为总活跃时长口径 + 共享响应缓存。
+    """
     tmp_root = str(tmp_path / "api2b")
     os.makedirs(tmp_root, exist_ok=True)
     day = "2099-01-03"
     os.makedirs(os.path.join(tmp_root, day), exist_ok=True)
-    # config 把 ai_sessions 扫描路径限定到空目录：collect 不扫真实 home，测试快且确定
-    with open(os.path.join(tmp_root, "config.json"), "w", encoding="utf-8") as fh:
-        json.dump({"ai_sessions": {"enabled": True,
-                                   "paths": {"t": [os.path.join(tmp_root, "nope")]}}}, fh)
     server = dashboard.create_server(tmp_root, port=0)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        s, d, _ = _req(port, "GET", "/api/heatmap?days=7&tokens=1")
+        s, d, _ = _req(port, "GET", "/api/heatmap?days=7")
         assert s == 200
         row = [x for x in d["days"] if x["date"] == day][0]
-        assert len(row["hourly_tokens"]) == 24
-        assert sum(row["hourly_tokens"]) == 0
-        # TTL 缓存命中：同键第二次请求结果一致
+        assert len(row["hourly_ms"]) == 24, "行必须带 24 小时总活跃分布"
+        assert "hourly_tokens" not in row, "tokens 变体已下线，不应再返回 hourly_tokens"
+        # 兼容旧参数写法：tokens=1 不再改变响应结构（同口径）
         s2, d2, _ = _req(port, "GET", "/api/heatmap?days=7&tokens=1")
-        assert s2 == 200 and d2["days"] == d["days"]
-        print("  [PASS] api_heatmap_hourly_tokens")
+        assert s2 == 200 and d2["days"] == d["days"], "tokens 参数不应再影响结果"
+        # 共享响应缓存命中：同键第二次请求结果一致
+        s3, d3, _ = _req(port, "GET", "/api/heatmap?days=7")
+        assert s3 == 200 and d3["days"] == d["days"]
+        print("  [PASS] api_heatmap_unified_metric")
     finally:
         server.shutdown()
         server.server_close()

@@ -2,8 +2,8 @@
 
 > 交接时间：2026-08-31 · 项目：VibeTrace（刻迹）（VibeTrace）
 > 远程仓库：https://github.com/Niangaol/VibeTrace（master 分支）
-> 当前版本：v2.9.4（已发布，2026-09-10）
-> 当前提交：v2.9.4 release 提交（见 git log）
+> 当前版本：v2.9.5（已发布，2026-09-12）
+> 当前提交：v2.9.5 release 提交（见 git log）
 
 ---
 
@@ -34,6 +34,7 @@
 | v2.9.2 | ✅ 已发布 | 修复批次：Git 深度分析崩溃（date/ts 字段误用 → UnboundLocalError）；学习曲线洞察死代码（by_ai 键不存在致规则永不触发）；成长指标 model_diversity_entropy 误塞 app 切换熵（含增量路径）；对比视图加载态 colspan 不一致；增量合并死变量 |
 | v2.9.3 | ✅ 已发布 | vibe coding 指标修正（growth 模型多样熵/提示效率/HHI 键名三连修复 + 学习曲线假洞察/persona 死键/deep_work 间隔上限/web_ai 配置容错）；新增 ZCode（db.sqlite + v2/sessions 双源）与 Codex CLI（rollout 专用解析）会话深度适配；DSH zstd 会话支持（含 PyInstaller zstandard 打包） |
 | v2.9.4 | ✅ 已发布 | 框架统一：tool_registry 工具注册表（21 本地 + 4 Web AI 单一事实源，含模型→厂商映射下发前端）+ metrics_util 统计辅助共享（熵/HHI/切换计数/fmt_usd/merge_dim）；仪表盘响应缓存框架（TTL+SWR 单飞，urls/ai-sessions/timeline/ai-compare/insights/heatmap 六端点共用）；概览新增 AI 编程热力图（28×24 Token）；前端错误横幅+重试/换日竞态保护/非阻塞加载；修复非法日历日穿透 400 契约（_valid_date 补语义校验）；/api/days?n=abc 回退 14；config.json 行尾噪音清理；全量 730 passed |
+| v2.9.5 | ✅ 已发布 | Token 口径与成本修正：展示改「新鲜输入 + 缓存分列」（tokens_in 含缓存读曾令单日显示 1 亿 Token）；内置 2 元组定价的缓存读改按供应商官方折扣计（GLM-5.3 25% / GLM-5.3-Flash 20% / qwen 隐式缓存 20%），未列入者标注为成本上限估算；新增概览「建议」栏位（advice.py 可选功能，默认关闭，8 条带依据的规则）；两处热力图统一为趋势口径（总活跃时长 × 84 天，删除 tokens 变体缓存与启动预热）；托盘单击改开浏览器；config.json 取消版本跟踪（防明文 api_key 入库）；全量 744 passed |
 | v2.8.1 | ✅ 已发布 | 小版本收口（无新特性）：多日 AI 成本查询 121s→0.95s（指纹确定性/缓存容量/解析记忆化/查询级批作用域）；/api/budget 边界年 500 兑现 200 空态契约；测试体系合二为一（test_all.py 47 函数并入 pytest 并退役，全链路 E2E 七阶段，覆盖率实测 79%） |
 | v2.8.0 | ✅ 已发布 | 工程收尾与测试补位：dashboard 纯函数外置 dashboard_util.py（1917→1714 行）、frontend smoke（4 项）+ e2e 冒烟（2 项）、覆盖率门禁 65→70；Git 侧采纳率代理指标（/api/adoption · 免责+折叠展示，confidence 永不 high）；受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势） |
 

@@ -340,3 +340,33 @@ def test_cache_pricing_math_three_tiers(tmp_path):
     assert abs(bm["cost_in"] - 0.00215) < 1e-12
     assert abs(bm["cost_total"] - 0.00315) < 1e-12
     print("  [PASS] cache_pricing_math_three_tiers")
+
+
+# ---------------------------------------------------------------------------
+# 7. 内置 2 元组定价的缓存折扣比真正进入成本（v2.9.5 回归钉扎）
+# ---------------------------------------------------------------------------
+def test_builtin_cache_ratio_applies_to_cost(tmp_path):
+    """内置 2 元组（glm-5.3 = 1.4/4.4）的缓存读按官方折扣比 25% 计费。
+
+    回归：此前 2 元组补 (in, in) → 缓存读按全价输入计。缓存密集型工作流
+    （缓存读可达输入的 98%）成本虚高数倍。现按供应商官方命中价折扣。
+    """
+    d = tmp_path / "ratio"
+    d.mkdir()
+    msg = {"role": "assistant", "model": "glm-5.3", "content": "x",
+           "timestamp": f"{_CLAUDE_DAY}T10:00:00",
+           "usage": {"input_tokens": 100, "output_tokens": 1000,
+                     "cache_read_input_tokens": 1_000_000}}
+    (d / "m.jsonl").write_text(json.dumps(msg) + "\n", encoding="utf-8")
+    cfg = {"ai_sessions": {"enabled": True, "costs": {"enabled": True},
+                           "paths": {"t": [str(d)]}}}
+    ai_sessions.invalidate_collect_cache()
+    total = ai_sessions.collect(_CLAUDE_DAY, cfg)["total"]
+    # glm-5.3 官方价 (in 1.4, out 4.4, 缓存读 0.35, 缓存写 1.4) USD/百万
+    exp_in = (100 * 1.4 + 1_000_000 * 0.35) / 1e6
+    exp_out = 1000 * 4.4 / 1e6
+    assert abs(total["cost_in"] - exp_in) < 1e-12, f"cost_in={total['cost_in']}"
+    assert abs(total["cost_total"] - (exp_in + exp_out)) < 1e-12
+    # 若仍按全价输入计，cost_in 会是 1.40014（> exp_in 的 0.35000014）
+    assert total["cost_in"] < 0.4, "缓存读仍按输入价计费（折扣未生效）"
+    print("  [PASS] builtin_cache_ratio_applies_to_cost")

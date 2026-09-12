@@ -1417,5 +1417,9 @@
     "daily_active_min": 480,
     "daily_coding_min": 240
   },
+  "advice": {
+    "enabled": false,
+    "max_items": 6
+  },
   "_comment": "分类与阈值规则，可编辑；修改后重启 monitor 生效"
 }

@@ -776,17 +776,58 @@ def _pricing_table(config: dict) -> dict:
     return table
 
 
-def _price4(val) -> tuple[float, float, float, float]:
+# ---------------------------------------------------------------------------
+# 缓存命中价折扣（仅用于未显式标注缓存价的定价条目）
+# ---------------------------------------------------------------------------
+# 供应商官方口径（2026-09 查证）：
+# - 智谱开放平台：GLM-5.3 缓存命中 2 元/百万（输入 8 元/百万）= 输入价 25%；
+#   Z.ai 标准价：GLM-5.3-Flash cached input $0.03（input $0.15）= 20%；
+# - 阿里云百炼上下文缓存（隐式，默认自动开启且不可关闭）：命中按输入价 20% 计费
+#   （显式缓存为 10%，但 agent 工具默认走隐式）；
+# - DeepSeek / OpenAI / Claude 系已在定价表里显式给出缓存单价（如 deepseek 10%），
+#   4 元组优先，不走本表。
+# 未列入的模型维持原语义（缓存按输入价计 = 成本上限估算），不臆造折扣；
+# 定价页的「缓存读 / 缓存写」两列可覆盖任意条目。
+_CACHE_READ_RATIO: tuple[tuple[str, float], ...] = (
+    ("glm-5.3-flash", 0.20),
+    ("glm-5.3", 0.25),
+    ("qwen", 0.20),
+)
+# 最长键优先（glm-5.3-flash 必须先于 glm-5.3 命中，与声明顺序解耦）
+_CACHE_READ_RATIO_SORTED: tuple[tuple[str, float], ...] = tuple(
+    sorted(_CACHE_READ_RATIO, key=lambda kv: -len(kv[0])))
+
+
+def _cache_read_ratio(model: str) -> float | None:
+    """未显式标缓存价的模型：官方「缓存命中价 / 输入价」折扣比；无官方口径返回 None。"""
+    m = (model or "").lower()
+    if not m:
+        return None
+    for key, ratio in _CACHE_READ_RATIO_SORTED:
+        if key in m:
+            return ratio
+    return None
+
+
+def _price4(val, cache_read_ratio: float | None = None) -> tuple[float, float, float, float]:
     """定价表值归一化为四元组 (in, out, cache_read, cache_write)。
 
-    - 4 元组原样返回；
-    - 2 元组 (in, out) 自动补 (in, in)：未配缓存档的模型按输入价计缓存（保守高估）；
+    - 4 元组原样返回；3 元组补 cache_write = 输入价；
+    - 2 元组 (in, out)：cache_read 取该模型供应商的官方折扣比（cache_read_ratio，
+      见 _CACHE_READ_RATIO）；无官方口径时按输入价计（成本上限估算）；
     - 非法/过短值返回 (0, 0, 0, 0)。
     """
     if isinstance(val, (list, tuple)) and len(val) >= 2:
         try:
             i, o = float(val[0]), float(val[1])
-            cr = float(val[2]) if len(val) > 2 else i
+            if len(val) > 2:
+                cr = float(val[2])
+            elif cache_read_ratio is not None:
+                # 6 位取整：避免 1.6×0.2=0.32000000000000006 之类浮点噪音
+                # 泄漏到 cost / API / 前端展示
+                cr = round(i * cache_read_ratio, 6)
+            else:
+                cr = i
             cw = float(val[3]) if len(val) > 3 else i
             return (i, o, cr, cw)
         except (TypeError, ValueError):
@@ -797,16 +838,19 @@ def _price4(val) -> tuple[float, float, float, float]:
 def _model_price(table: dict, model: str) -> tuple[float, float, float, float]:
     """按模型名匹配（进/出/缓存读/缓存写 USD 每百万 Token）。
 
-    表值可为 2 或 4 元组，统一经 _price4 归一化；未匹配返回 (0, 0, 0, 0)。
+    表值可为 2/3/4 元组，统一经 _price4 归一化：2 元组的 cache_read 取该供应商
+    的官方缓存命中折扣比（_CACHE_READ_RATIO），无官方口径则按输入价（成本上限）。
+    未匹配返回 (0, 0, 0, 0)。
     """
     m = (model or "").lower()
     if not m:
         return (0.0, 0.0, 0.0, 0.0)
+    ratio = _cache_read_ratio(m)
     if m in table:
-        return _price4(table[m])
+        return _price4(table[m], ratio)
     for key in sorted(table, key=len, reverse=True):
         if key in m:
-            return _price4(table[key])
+            return _price4(table[key], ratio)
     return (0.0, 0.0, 0.0, 0.0)
 
 

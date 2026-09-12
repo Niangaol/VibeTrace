@@ -104,8 +104,10 @@ def test_loadoverview_only_awaits_day_endpoint():
     for ep in ["/api/urls", "/api/ai-sessions", "/api/budget", "/api/goals", "/api/days"]:
         assert f'await api("{ep}' not in body, f"loadOverview 仍在串行 await {ep}"
         assert f'api("{ep}' in body, f"loadOverview 丢失 {ep} 调用"
-    # heatmap 刻意不 await 的既定写法必须原样保留
-    assert 'api("/api/heatmap?days=28&tokens=1").then(' in body, "heatmap 非阻塞调用被改动"
+    # heatmap 刻意不 await 的既定写法必须原样保留；且与趋势同口径（84 天 / hourly_ms）
+    assert 'api("/api/heatmap?days=84").then(' in body, "heatmap 非阻塞调用被改动"
+    assert 'heatmapHTML(hm.days, "hourly_ms", fmtMs)' in body, "概览热力图须与趋势同口径"
+    assert "tokens=1" not in body, "tokens 变体已下线"
 
 
 def test_compare_iso_uses_local_date():
@@ -137,6 +139,17 @@ def test_loadoverview_callbacks_guard_against_stale_day():
     assert m, "未找到 loadOverview 函数"
     body = m.group(1)
     assert "const day = state.day;" in body, "loadOverview 未在开头捕获本轮日期"
-    # urls / heatmap / ai-sessions / budget / goals / days 六个非阻塞请求，至少各一处守卫
-    assert body.count("state.day !== day") >= 6, \
-        "非阻塞回调缺少日期守卫（state.day !== day 应至少出现 6 次）"
+    # urls / heatmap / ai-sessions / budget / goals / advice / days 非阻塞请求，至少各一处守卫
+    assert body.count("state.day !== day") >= 7, \
+        "非阻塞回调缺少日期守卫（state.day !== day 应至少出现 7 次）"
+
+
+def test_advice_panel_wiring():
+    """建议栏位（v2.9.5，可选功能）：概览面板 + 非阻塞调用 + 渲染函数 + 设置页开关。"""
+    html = _template()
+    assert 'id="ovAdvice"' in html, "缺少概览建议面板容器"
+    assert 'id="adviceEnabled"' in html and 'id="btnSaveAdvice"' in html, "缺少设置页建议开关"
+    assert "function renderAdvicePanel(a){" in html, "缺少建议渲染函数"
+    assert 'api("/api/advice?date=" + day).then(' in html, "概览未非阻塞拉取 /api/advice"
+    assert 'await api("/api/advice?date=' not in html, "概览建议请求不应阻塞其他面板"
+    assert 'postJson("/api/advice/settings"' in html, "缺少建议设置保存调用"
