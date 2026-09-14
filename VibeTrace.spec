@@ -16,8 +16,14 @@ a = Analysis(
         ('assets/tray.ico', 'assets'),
         ('assets/dashboard.html', 'assets'),
     ] + _zstd_datas,
+    # 本项目模块多为惰性导入（函数内 import），显式列为 hiddenimports 以防漏打包：
+    # dashboard/advice/goals 等由 monitor 或 dashboard 在运行时按需导入。
     hiddenimports=['insights', 'updater', 'sqlite_store', 'ai_sessions',
                    'timeline', 'budget', 'tool_compare', 'growth', 'query', 'adoption',
+                   'advice', 'dashboard', 'dashboard_util', 'goals', 'metrics_util',
+                   'tool_registry', 'git_insights', 'alerts', 'learn', 'applog',
+                   'browser_history', 'classifier', 'report', 'tray', 'paths',
+                   'version', 'win32core', 'inventory',
                    'zstandard'] + _zstd_hidden,
     hookspath=[],
     hooksconfig={},

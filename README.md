@@ -167,8 +167,7 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 | `DATA_ROOT` | `config.json` 的 `data_root` | 数据根覆盖 |
 | `PORT` | `8765` | 仪表盘端口 |
 | `PYTHON` | 自动探测 | Electron 壳 / 启动器使用的 Python |
-| `USAGEMON_USE_ELECTRON` | 未设置 | `=1` 用 Electron 桌面壳打开仪表盘（默认用系统浏览器） |
-| `USAGEMON_USE_BROWSER` | 未设置 | 旧开关，兼容保留：与默认行为一致（浏览器打开） |
+| `USAGEMON_USE_BROWSER` | 未设置 | `=1` 强制用浏览器打开仪表盘（默认优先 Electron 桌面壳；壳缺失/启动失败时自动回退浏览器） |
 
 ### 访问
 

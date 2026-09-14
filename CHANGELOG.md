@@ -8,6 +8,21 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [2.9.6] - 2026-09-14
+
+> 主题：修复 v2.9.5 的托盘行为回归——单击托盘图标错误地打开浏览器，恢复为唤出 Electron 桌面应用窗口。
+
+### 修复
+- **托盘单击错误地打开浏览器（v2.9.5 回归）**：v2.9.5 把 `open_dashboard` 的默认改为「浏览器优先」，单击托盘图标不再唤出 Electron 桌面应用窗口。现恢复 **Electron 壳优先**（`USAGEMON_USE_BROWSER=1` 仍为强制浏览器的调试开关）；壳缺失或启动失败时自动回退浏览器。README 中英环境变量表同步回退
+- **打包漏模块**：`VibeTrace.spec` 的 `hiddenimports` 补全本地惰性导入模块（`advice` / `dashboard` / `dashboard_util` / `goals` / `metrics_util` / `tool_registry` / `git_insights` / `alerts` / `learn` / `applog` / `browser_history` / `classifier` / `report` / `tray` / `paths` / `version` / `win32core` / `inventory`），避免打包后运行期 import 失败（v2.9.5 新增的 `advice` 正属此类）
+
+### 测试（2.9.6）
+- 新增 `tests/unit/test_open_dashboard.py`（3 项）：有壳必启 Electron 且不开浏览器、无壳回退浏览器、`USAGEMON_USE_BROWSER=1` 强制浏览器——钉扎本次回归
+- 全量回归 **747 passed, 0 failed**
+
+### 说明
+- 本机 `electron-app/node_modules/electron/dist/electron.exe` 曾缺失（DLL 齐全、主程序不在，疑为杀软误删），导致无论优先级如何都只能开浏览器；已用镜像重装 electron 33.4.11 二进制修复。属本地环境问题，非代码缺陷
+
 ## [2.9.5] - 2026-09-12
 
 > 主题：Token 口径与成本修正（新鲜输入 + 缓存分列、缓存按官方折扣价计）+ 概览「建议」栏位（可选）+ 两处热力图统一（以趋势为准）+ config.json 取消版本跟踪（防密钥泄漏）。

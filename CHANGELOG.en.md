@@ -8,6 +8,21 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [2.9.6] - 2026-09-14
+
+> Theme: fixes the v2.9.5 tray regression — single-clicking the tray icon wrongly opened the browser instead of bringing up the Electron desktop window.
+
+### Fixed
+- **Tray single-click wrongly opened the browser (v2.9.5 regression)**: v2.9.5 switched `open_dashboard` to browser-first, so clicking the tray icon stopped bringing up the Electron desktop app. It is back to **Electron-shell-first** (`USAGEMON_USE_BROWSER=1` remains the debug switch that forces the browser); the browser is used only when the shell is missing or fails to start. The README env tables (zh/en) were reverted accordingly
+- **Missing modules in the build**: `VibeTrace.spec` now lists every locally and lazily imported module in `hiddenimports` (`advice` / `dashboard` / `dashboard_util` / `goals` / `metrics_util` / `tool_registry` / `git_insights` / `alerts` / `learn` / `applog` / `browser_history` / `classifier` / `report` / `tray` / `paths` / `version` / `win32core` / `inventory`), preventing runtime import failures in the packaged exe (the new `advice` module was exactly such a case)
+
+### Tests (2.9.6)
+- New `tests/unit/test_open_dashboard.py` (3 cases): with a shell it must launch Electron and not open the browser; without a shell it falls back to the browser; `USAGEMON_USE_BROWSER=1` forces the browser — pinning this regression
+- Full regression **747 passed, 0 failed**
+
+### Notes
+- The local `electron-app/node_modules/electron/dist/electron.exe` was missing (all DLLs present, main binary gone — likely quarantined by antivirus), so the browser was the only option regardless of priority; reinstalling the electron 33.4.11 binary via a mirror fixed it. This is an environment issue, not a code defect
+
 ## [2.9.5] - 2026-09-12
 
 > Theme: token-semantics and cost corrections (fresh input + cache shown separately, cache billed at official discount rates) + overview "Advice" panel (opt-in) + unified heatmaps (trend view as the source of truth) + config.json untracked (prevents leaking secrets).
