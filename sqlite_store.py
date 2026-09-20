@@ -26,6 +26,7 @@ import re
 import sqlite3
 import sys
 
+import applog  # noqa: E402
 import paths  # noqa: E402
 
 DB_NAME = "usage.db"
@@ -171,8 +172,8 @@ def _shared_conn(data_root: str) -> "sqlite3.Connection":
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-        except Exception:  # noqa: BLE001 —— PRAGMA 失败不影响可用性
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— PRAGMA 失败不影响可用性
+            applog.note(_exc, "sqlite_store: PRAGMA 设置失败，沿用连接默认参数")
         _CONN_CACHE[key] = conn
     if key not in _INITED_KEYS:
         init_db(conn)
@@ -188,8 +189,8 @@ def close_connection(data_root: str) -> None:
     if conn is not None:
         try:
             conn.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "sqlite_store: 单连接关闭失败")
     _INITED_KEYS.discard(key)
 
 
@@ -198,8 +199,8 @@ def close_connections() -> None:
     for conn in list(_CONN_CACHE.values()):
         try:
             conn.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "sqlite_store: 关闭全部连接失败")
     _CONN_CACHE.clear()
     _INITED_KEYS.clear()
 

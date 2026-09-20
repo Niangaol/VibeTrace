@@ -8,6 +8,148 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 > 简体中文版: [CHANGELOG.md](CHANGELOG.md)
 
+## [2.9.12] - 2026-09-20
+
+> This release merges all changes from the six internal patch iterations v2.9.7 – v2.9.12
+> (those iteration numbers were never tagged/released individually; everything ships now as
+> a single patch release). Themes: **unified data-access framework, two P0 performance
+> fixes, project-wide degradation observability**. Last published version: v2.9.6 (2026-09-14).
+
+### Refactor · derived.py shared data-access framework (v2.9.8)
+
+- New `derived.py`: `day_bundle()` / `series()` / `cached_endpoint()`, converging 13
+  duplicated per-day loops (229 lines) across growth / tool_compare / query / budget /
+  insights / advice — each of them hand-writing `report.aggregate(day)` +
+  `ai_sessions.collect(day)` — into one implementation. The `need` bitmask
+  (NEED_AGG / NEED_AI / NEED_GIT / NEED_WEB) fetches only requested sources: unrequested
+  sources are neither imported nor called (zero overhead).
+- Semantic rules pinned by tests: exactly one call per source per day; runtime attribute
+  access for `report.aggregate` (100+ tests monkeypatch the module attribute); AGG/AI
+  failure voids the day, GIT/WEB failure only degrades; never nest
+  `collect_fingerprint_batch()` inside `day_bundle()`.
+- `growth._aggregate_week` and `_merge_incremental` now share `_day_metrics()` for
+  single-day fetching — historical drift bugs in focus_hhi / ai_sessions /
+  prompt_efficiency came precisely from two hand-written copies going out of sync.
+- Three framework defects fixed during rollout (v2.9.9): `series` gained an explicit
+  `days=` parameter (growth weeks have gaps; query/budget ranges are not look-back
+  shaped — no more silent day skipping); `day_bundle` AI source tolerates two-arg
+  implementations and the WEB source now receives `config`; git call signature fixed to
+  `git_insights(config, day_str)` (the exception used to be swallowed, silently zeroing
+  all Git metrics).
+
+### Performance · P0-1 browser history without full-database copy (v2.9.9 / v2.9.10)
+
+- `find_url_for_session` used to `shutil.copy2` the entire History database to a temp
+  directory on every call (Chrome commonly 50–300MB; seconds of I/O per session switch,
+  blocking the 5-second polling thread).
+- Now reads the source database directly via `_query_source_ro()`: with a `-wal` file it
+  first tries `mode=ro` (replays not-yet-checkpointed visits — strictly more data than the
+  old immutable read of the copy), falling back to `immutable=1` on failure (locked /
+  missing `-shm`); without `-wal` it goes straight to immutable.
+  - Key detail: `sqlite3.connect()` itself never raises — "database is locked" surfaces on
+    the first `execute`, so the fallback must wrap `execute`.
+  - `_open_ro` gained `timeout=0.5` so a held lock can never stall the polling thread.
+  - Any sqlite error returns `[]`: query failure never blocks session persistence
+    (best-effort semantics unchanged).
+- Measured: 6.1ms → 0.49ms per call (≈12×), with zero temp files on disk.
+- Also removed a hidden side effect: monitor scenario tests really were full-copying the
+  dev machine's browser databases (`_close_session` ignored the
+  `browser_history_enabled` switch).
+
+### Performance · P0-2 git subprocess N+1 → range batching (v2.9.11)
+
+- New `git_insights.range_batch(days)` context (mirroring `collect_fingerprint_batch`):
+  on entry, one `git log --since/--until` fetches the whole range, results are bucketed
+  by **committer date (%cd)**; inside the block `git_insights()` reads the table, outside
+  it behaves byte-for-byte like the old per-day path.
+  - Bucketing by `%cd` rather than `%ad` is critical: `--since/--until` filters by
+    committer date, while author date mis-buckets on cross-day amend/rebase (pinned by a
+    dedicated test).
+- `git_insights()` split into `_resolve_projects` / `_assemble_result` /
+  `_empty_result`; `analyze_repo` split into "run git" + `_stats_from_commits` — range
+  and single-day paths now share one aggregation implementation.
+- `_parse_numstat` keeps an extra `cd` field (old format falls back to `date`,
+  backward compatible).
+- `growth._aggregate_week` and `_merge_incremental` wrap their per-day loops in
+  `range_batch`.
+- Measured locally: one week 1.16s → 0.20s; 44 days ≈9.2s → ≈1.4s; deep mode ≈18s → ≈1.4s.
+
+### Fix · range_batch equivalence (v2.9.12)
+
+- **Deep mode lost the entire deep analysis inside a batch**: `_build_day_table()`
+  unconditionally took the shallow `_stats_from_commits()` path, so with
+  `insights.git.deep=true` batch results lacked deep_work_summary, authors_detail,
+  commit_rhythm, adoption_proxy, language_dist and deep_work_blocks (15 fields per day
+  with commits). Now branches on `gc[deep]` into `analyze_repo_deep` and reuses
+  `_assemble_result` (deep metrics are per-day by nature and cannot be sliced from range
+  results, so each repo is re-run); `ai_project_files`, previously ignored entirely
+  inside batches, is now passed through.
+- **Inconsistent degradation notice wording**: with enabled=false / empty projects the
+  batch path now uniformly returns "batch not enabled or no repositories", aligned
+  verbatim with the per-day path's two messages.
+- **Batch table not isolated by config fingerprint**: `_batch_key()` was written but
+  called zero times (dead code) — switching config inside one range_batch block returned
+  the previous cache table. Now wired in.
+- Aggregation uniformly follows `_assemble_result` instead of hand-written accumulators.
+
+### Observability · 34 intentional degradations no longer silent (v2.9.7)
+
+- New `applog.note(exc, ctx)`: 34 by-design `except Exception: ... pass` sites project
+  -wide (corrupt pricing files, classifier rule load failures, rejected Win32 calls,
+  SQLite fast-path fallback to JSONL, tray balloon failures, …) now route through
+  `note()` — behavior unchanged (still no raise, still degraded), but from "no trace at
+  all" to landing in `<data_root>/logs/app.log`, directly visible in the dashboard's Log
+  view. Targets the class of "numbers don't add up and there's no way to find out why".
+- The observation outlet itself is zero-risk: a NullHandler is attached (zero output before
+  `configure()`, keeping CLI/test environments quiet) and `note()` never raises.
+- The remaining ~19 `except Exception: ... pass` sites are "logging itself failed" or
+  `__main__` entry fallbacks and stay silent by design.
+
+### Fixes & cleanup
+
+- `metrics_util.merge_dim` raised KeyError on caller-built buckets missing float keys:
+  accumulation was `t[fk] +=`, crashing when `cost_in` / `cost_out` / `cost_total` was
+  absent — contradicting the docstring's "missing fields count as 0". Added
+  `setdefault(fk, 0.0)` plus `_new_bucket()` generated from the `_MERGE_*_KEYS` tuples,
+  removing the literal-vs-KEYS duplication. Behavior for well-formed input is unchanged.
+- `.gitignore` now blocks the 170MB bundled Python runtime from being committed:
+  added `/Python/`, `pythoncore-*-*/`, `review-*.md` (a single `git add -A` could
+  previously commit an entire CPython into the repo).
+- `VibeTrace.spec` hiddenimports gained `derived`.
+- Fixed 17 `NameError: applog` regressions introduced in v2.9.8 (alerts / dashboard /
+  monitor / report only had function-level lazy imports; module-level use was an
+  undefined name — a crash in production the moment those degradation branches ran,
+  caught by ruff's F821). Module-level `import applog` added.
+- `tool_compare.compare_tools` intentional semantic change: when `report.aggregate`
+  fails for a single day, that day's AI-side data used to survive; going through derived
+  now voids the whole day. Results are field-for-field identical when both sources work.
+
+### Test isolation fix (pre-release)
+
+- `test_api_insights_includes_time_saved` now passes an isolated `config.json` with AI
+  disabled: the case exercises the AI path of `/api/insights`, and with the default
+  config it picked up the dev machine's repo-root `config.json`
+  (`insights.ai.enabled=true`) and **really called the LLM endpoint**, hanging until
+  timeout (CI has no such file, so this never surfaced there — a test isolation defect).
+  The assertions only care about the offline time_saved fields.
+
+### Tests
+
+- Added: `test_derived.py` (33 cases), `test_git_range_batch.py` (17),
+  `test_find_url_no_copy.py` (8), `test_applog_note.py` (6),
+  `test_metrics_util.py` (44), `test_tray.py` (41 + 1 skip).
+- `test_git_range_batch`'s repo fixture gained a `requires_git` guard: under Windows,
+  pytest's fd-level capture invalidates the inherited stdin handle and
+  `subprocess.run` raises `OSError [WinError 6]` (environmental, not a code issue);
+  with the guard the scenario degrades to skip instead of error.
+
+### Full status (measured pre-release · 2026-09-20)
+
+- **Full `pytest tests`: 882 passed / 7 skipped / 0 failed** (unit / integration / api / frontend / security / performance / e2e, 192s)
+  - of which tests/unit: 696 passed / 7 skipped / 0 failed
+  - tests/security + tests/e2e + tests/performance + tests/api: 108 passed / 0 failed
+- ruff check .: **0 violations**
+
 ## [2.9.6] - 2026-09-14
 
 > Theme: fixes the v2.9.5 tray regression — single-clicking the tray icon wrongly opened the browser instead of bringing up the Electron desktop window.

@@ -1,9 +1,9 @@
 # 交接文档 / 待办清单
 
-> 交接时间：2026-08-31 · 项目：VibeTrace（刻迹）（VibeTrace）
+> 交接时间：2026-09-20 · 项目：VibeTrace（刻迹）（VibeTrace）
 > 远程仓库：https://github.com/Niangaol/VibeTrace（master 分支）
-> 当前版本：v2.9.6（已发布，2026-09-14）
-> 当前提交：v2.9.6 release 提交（见 git log）
+> 当前版本：v2.9.12（本次发布；合并 v2.9.7 – v2.9.12 六个内部迭代，均未单独打 tag）
+> 当前提交：见 git log（v2.9.12 release 提交，含 2.9.7 起全部未提交改动）
 
 ---
 
@@ -22,72 +22,62 @@
 | v2.1.1 | ✅ 已发布 | SQLite 一致性校验、周聚合快速路径、updater/更新 API 测试、SHA256 资产、覆盖率扩展 |
 | v2.2.0 | ✅ 已发布 | UWP 识别、管理员模式、Firefox 停留时长、更新供应链安全、更多应用适配 |
 | v2.3.0 | ✅ 已发布 | AI 会话深度（Phase 1）+ 成本与 ROI（Phase 3）+ 概览整合 / AI 洞察独立 |
-| v2.4.0 | ✅ 已发布 | 测试流程金字塔（docs/TEST_WORKFLOW.md + pytest 85项 + CI fast/full + 覆盖率 56%）；Phase 3 时间节省估算（insights.time_saved）落地；前端 6 项细节修补；配置漂移修复；应用白名单补齐 |
+| v2.4.0 | ✅ 已发布 | 测试流程金字塔（docs/TEST_WORKFLOW.md + CI fast/full + 覆盖率门禁）；Phase 3 时间节省估算（insights.time_saved）；前端 6 项细节修补；配置漂移修复；应用白名单补齐 |
 | v2.5.0 | ✅ 已发布 | Vibe Coding 分析平台主线：AI 会话质量评分、时间轴回放、成本预算告警、多工具横向对比、能力成长曲线、受限模板查询；前端模板外抽 |
 | v2.5.1 | ✅ 已发布 | 修复真实使用中的前端/数据层缺陷（导出 400、成长/对比按钮、模型识别与成本）+ AI 模型价格设置（/api/pricing） |
-| v2.5.2 | ✅ 已发布 | 精炼 AI 会话模型识别：会话级模型仅统计 assistant 消息已知模型，「未识别」大幅减少 |
+| v2.5.2 | ✅ 已发布 | 精炼 AI 会话模型识别：会话级模型仅统计 assistant 消息已知模型 |
 | v2.5.3 | ⚠️ 无 tag/Release | 仅在 CHANGELOG 有记录，未打 tag（AI 价格设置可用 + 导出进度反馈） |
-| v2.7.0 | ✅ 已发布 | 行动与目标：告警闭环（alerts.py · 预算 warn/exceed + 连续工作休息提醒，托盘气泡）；每日目标与 streak（goals.py · 可选默认关闭，/api/goals + 概览进度面板 + 设置开关组）；全局性能优化（AI/浏览器历史指纹缓存、SQLite 提速、Token 真实用量优先与加权估算、learn.py 基线） |
-| v2.8.2 | ✅ 已发布 | 小版本修复：五处模块级缓存补线程锁（dashboard 并发请求下 LRU 竞态）；报表链透传 config_path（--data-root 下日报配置不生效，优先级与 dashboard 统一）；守护循环暂停分支补退出检查（暂停后退出不再挂死）；新增并发锤/配置流/暂停退出三类回归钉扎 |
-| v2.9.0 | ✅ 已发布 | 仪表盘全面视觉升级：设计令牌系统化（radius/space/shadow/ease/transition）、亮暗双主题精修、11 类克制动效（reduced-motion 降级）；模型价格按 6 厂商分组折叠；应用品牌图标；批次二修复（目录枚举确定性化并提上限至 4096、周/月报 config_path 贯通并激活 CLI --config） |
-| v2.9.1 | ✅ 已发布 | 成长/对比指标扩展（model_diversity_entropy/tool_switch_freq/focus_hhi/learning_curve/efficiency_stability/adoption_proxy/prompt_efficiency 七类）；Git 深度分析（auto_discover 递归≤3 + author_detail/commit_rhythm/language_dist/deep_work）；模型正则 60+/agent 路径 29/定价 90 条；ActivityWatch 参考指标与 6 类新洞察；DSH Desktop 适配与前端厂商归类；timeline/growth/compare 加载态 |
-| v2.9.2 | ✅ 已发布 | 修复批次：Git 深度分析崩溃（date/ts 字段误用 → UnboundLocalError）；学习曲线洞察死代码（by_ai 键不存在致规则永不触发）；成长指标 model_diversity_entropy 误塞 app 切换熵（含增量路径）；对比视图加载态 colspan 不一致；增量合并死变量 |
-| v2.9.3 | ✅ 已发布 | vibe coding 指标修正（growth 模型多样熵/提示效率/HHI 键名三连修复 + 学习曲线假洞察/persona 死键/deep_work 间隔上限/web_ai 配置容错）；新增 ZCode（db.sqlite + v2/sessions 双源）与 Codex CLI（rollout 专用解析）会话深度适配；DSH zstd 会话支持（含 PyInstaller zstandard 打包） |
-| v2.9.4 | ✅ 已发布 | 框架统一：tool_registry 工具注册表（21 本地 + 4 Web AI 单一事实源，含模型→厂商映射下发前端）+ metrics_util 统计辅助共享（熵/HHI/切换计数/fmt_usd/merge_dim）；仪表盘响应缓存框架（TTL+SWR 单飞，urls/ai-sessions/timeline/ai-compare/insights/heatmap 六端点共用）；概览新增 AI 编程热力图（28×24 Token）；前端错误横幅+重试/换日竞态保护/非阻塞加载；修复非法日历日穿透 400 契约（_valid_date 补语义校验）；/api/days?n=abc 回退 14；config.json 行尾噪音清理；全量 730 passed |
-| v2.9.5 | ✅ 已发布 | Token 口径与成本修正：展示改「新鲜输入 + 缓存分列」（tokens_in 含缓存读曾令单日显示 1 亿 Token）；内置 2 元组定价的缓存读改按供应商官方折扣计（GLM-5.3 25% / GLM-5.3-Flash 20% / qwen 隐式缓存 20%），未列入者标注为成本上限估算；新增概览「建议」栏位（advice.py 可选功能，默认关闭，8 条带依据的规则）；两处热力图统一为趋势口径（总活跃时长 × 84 天，删除 tokens 变体缓存与启动预热）；托盘单击改开浏览器；config.json 取消版本跟踪（防明文 api_key 入库）；全量 744 passed |
-| v2.9.6 | ✅ 已发布 | 修复 v2.9.5 托盘行为回归：单击托盘图标恢复唤出 Electron 桌面应用窗口（此前被改成浏览器优先）；USAGEMON_USE_BROWSER=1 仍为强制浏览器调试开关；VibeTrace.spec hiddenimports 补全惰性导入模块（advice/dashboard/goals 等）防打包漏模块；新增 test_open_dashboard.py 三项钉扎；全量 747 passed |
-| v2.8.1 | ✅ 已发布 | 小版本收口（无新特性）：多日 AI 成本查询 121s→0.95s（指纹确定性/缓存容量/解析记忆化/查询级批作用域）；/api/budget 边界年 500 兑现 200 空态契约；测试体系合二为一（test_all.py 47 函数并入 pytest 并退役，全链路 E2E 七阶段，覆盖率实测 79%） |
-| v2.8.0 | ✅ 已发布 | 工程收尾与测试补位：dashboard 纯函数外置 dashboard_util.py（1917→1714 行）、frontend smoke（4 项）+ e2e 冒烟（2 项）、覆盖率门禁 65→70；Git 侧采纳率代理指标（/api/adoption · 免责+折叠展示，confidence 永不 high）；受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势） |
+| v2.7.0 | ✅ 已发布 | 行动与目标：告警闭环（alerts.py）；每日目标与 streak（goals.py）；全局性能优化（AI/浏览器历史指纹缓存、SQLite 提速、Token 真实用量优先与加权估算、learn.py 基线） |
+| v2.8.0 | ✅ 已发布 | 工程收尾：dashboard 纯函数外置 dashboard_util.py；frontend smoke + e2e 冒烟；覆盖率门禁 65→70；Git 侧采纳率代理指标（/api/adoption）；受限查询模板扩充（q6/q7/q8） |
+| v2.8.1 | ✅ 已发布 | 小版本收口：多日 AI 成本查询 121s→0.95s；/api/budget 边界年 500→200 空态契约；测试体系合二为一（test_all.py 并入 pytest 并退役）；覆盖率实测 79% |
+| v2.8.2 | ✅ 已发布 | 小版本修复：五处模块级缓存补线程锁；报表链透传 config_path；守护循环暂停分支补退出检查；三类回归钉扎 |
+| v2.9.0 | ✅ 已发布 | 仪表盘视觉升级：设计令牌系统化、亮暗双主题、11 类克制动效；模型价格按厂商分组折叠；应用品牌图标；目录枚举确定性化；周/月报 config_path 贯通 |
+| v2.9.1 | ✅ 已发布 | 成长/对比七类新指标；Git 深度分析（auto_discover + author_detail/commit_rhythm/language_dist）；模型正则 60+/agent 路径 29/定价 90 条；ActivityWatch 参考指标；DSH Desktop 适配 |
+| v2.9.2 | ✅ 已发布 | 修复批次：Git 深度崩溃（UnboundLocalError）；学习曲线洞察死代码；模型多样熵误塞 app 切换熵；对比视图 colspan；增量合并死变量 |
+| v2.9.3 | ✅ 已发布 | vibe coding 指标三连修复；ZCode/Codex CLI 会话深度适配；DSH zstd 支持（含 PyInstaller zstandard 打包） |
+| v2.9.4 | ✅ 已发布 | 框架统一：tool_registry 工具注册表 + metrics_util 统计辅助单一来源；仪表盘响应缓存框架（TTL+SWR 单飞，六端点共用）；AI 编程热力图；前端错误横幅+重试；非法日历日 400 契约；全量 730 passed |
+| v2.9.5 | ✅ 已发布 | Token 口径与成本修正（缓存读按供应商折扣计）；概览「建议」栏位（advice.py）；两处热力图统一趋势口径；托盘单击改开浏览器；config.json 取消版本跟踪；全量 744 passed |
+| v2.9.6 | ✅ 已发布 | 修复 v2.9.5 托盘回归（单击恢复唤出 Electron 壳）；USAGEMON_USE_BROWSER=1 调试开关；spec hiddenimports 补全；新增 test_open_dashboard.py 三项钉扎；全量 747 passed |
+| v2.9.7 – v2.9.12 | 🔀 合并为 v2.9.12 发布 | 六个内部迭代从未单独打 tag，改动一次性合并发布：derived.py 取数框架；浏览器历史免整库拷贝（12×）；git 区间批量 range_batch（44 天 9.2s→1.4s）+ 等价性修正；34 处降级可观测（applog.note）；metrics_util 桶字段收敛；.gitignore 封堵内嵌 Python；测试隔离修复 |
 
 ---
 
-## 已完成（截至 v2.2.0）
+## 已完成（截至 v2.9.12）
 
-### P1
-- ✅ 仪表盘周报/月报视图
-- ✅ 仪表盘数据导出（CSV/JSON）
-- ✅ AI 会话深度统计（`ai_sessions.py`，默认关闭）
-- ✅ 数据备份/恢复
-- ✅ 配置热重载
-- ✅ 托盘通知
-- ✅ 主题切换
-- ✅ 仪表盘访问口令
-- ✅ Firefox 历史支持
-- ✅ SQLite 后端 `usage.db`（`sqlite_store.py`，JSONL 仍为原始事实源）
-- ✅ 多语言 README
+### 基础与监控
+- ✅ 前台窗口计时（5s 轮询、变化才写、静止零写入）；空闲/锁屏不计时
+- ✅ 软件清单扫描（注册表/开始菜单/运行进程）+ 自动分类
+- ✅ 社交联系人识别 + 别名表（aliases.json）
+- ✅ 浏览器 URL 级历史（Chromium 系 + Firefox，免拷贝直读源库）
+- ✅ AI 编程监控（进程树识别终端里的 AI CLI，tool_registry 单一事实源）
+- ✅ UWP/商店应用识别；管理员模式（--admin 自动 UAC）
 
-### P2
-- ✅ CHANGELOG.md + CHANGELOG.en.md
-- ✅ CONTRIBUTING.md + Issue/PR 模板
-- ✅ README CI/Release 徽章
-- ✅ version.py ↔ tag 同步校验
-- ✅ 测试覆盖率（含 insights/updater/sqlite_store/ai_sessions）
+### 报表与仪表盘
+- ✅ 日报/周报/月报（Markdown + CSV）+ CLI 查询 + verify/repair
+- ✅ 本地网页仪表盘十三视图（概览/趋势/日报/周报/月报/会话/时间轴/成长/对比/日志/分组/洞察/设置）
+- ✅ 数据导出（CSV/JSON）、备份/恢复、访问口令、Origin 校验
+- ✅ 仪表盘响应缓存框架（TTL+SWR 单飞，六端点共用）
+
+### 洞察与 AI
+- ✅ 离线规则引擎 + 个性化基线（learn.py，Welford/z-score）
+- ✅ 可选 AI 洞察（OpenAI 兼容端点，默认关闭，聚合统计隐私过滤）
+- ✅ AI 会话深度统计（轮次/Token/成本/质量评分；ZCode/Codex/DSH zstd 等适配）
+- ✅ 告警闭环（alerts.py）+ 每日目标 streak（goals.py）
+- ✅ 采纳率代理（adoption.py，Git 侧，免责+折叠）
+- ✅ 降级可观测（applog.note，34 处静默异常落盘 logs/app.log）
+
+### 框架与性能（v2.9.7 – v2.9.12）
+- ✅ derived.py 派生取数框架：13 处逐日循环（229 行）收敛为 day_bundle/series 单入口，六模块共用
+- ✅ 浏览器历史免整库拷贝：_query_source_ro 直读源库，6.1ms → 0.49ms（约 12×）
+- ✅ git 区间批量 range_batch：一次 git log 按 committer date 分桶，44 天约 9.2s → 1.4s
+- ✅ metrics_util 统计辅助单一来源（熵/HHI/切换计数/维度合并/格式化），_new_bucket 消除双份定义
+- ✅ tool_registry 工具注册表（21 本地 + 4 Web AI 单一事实源）
+
+### 测试与工程
+- ✅ pytest 分层测试（unit/integration/api/frontend/performance/security/e2e）
+- ✅ 覆盖率门禁 70%（实测约 80%）；ruff check . 0 违规
+- ✅ PyInstaller 单文件 exe + CI 打 tag 自动构建 Release（附 sha256）
 - ✅ GitHub Pages 文档站
-- ⏸️ exe 代码签名（无证书，未做）
-
-### 长期目标
-- ✅ UWP/商店应用识别（`win32core.get_uwp_app_name` + `config.uwp_app_names`）
-- ✅ 管理员权限模式（`monitor.py --admin` 自动 UAC 提权）
-- ✅ Firefox 停留时长估算（`config.firefox_dwell_max_s`，默认 600s）
-- ✅ 更新供应链安全（资产下载地址白名单）
-
-### AI 编程深度追踪（docs/ROADMAP.md · Phase 1 · v2.3.0 开发中）
-- ✅ 对话轮次追踪（本地会话 user→assistant 配对 + 浏览器历史 Web AI 会话分组/轮次推断）
-- ✅ Token 用量估算（`ai_sessions.token_estimation`：CJK 1 Token/字，其余 4 字符/Token）
-- ✅ 按模型拆分（`by_model`，模型字段/内容正则识别）
-- ✅ 按项目拆分（`by_project`，cwd/project/repo 字段，会话级归口）
-- ✅ 仪表盘「AI 会话详情」面板 + 日报「AI 会话深度」章节 + `ai_sessions --web` CLI
-- ✅ Phase 3 成本与 ROI（按模型计价 / 按项目分摊 / 成本面板与日报成本章节 + 周/月汇总成本账本）
-- ✅ Phase 3 时间节省估算（`insights.time_saved`：AI 时长 × 因子 2.0 离线估算，洞察面板 · v2.4.0）
-- ✅ Phase 4 行为洞察（死循环检测 + 专注度评分 + Vibe 编程人格分析；洞察页面板 + 日报今日建议）
-- ✅ Phase 2 的 Git 集成·代码变更分析（`git_insights.py`：只读本地提交/增删行/改动文件/修改率，洞察面板 + 日报）
-- ⏸️ Phase 2 采纳率/留存率/修改率（需 IDE 插件，尚未做）
-### 更多应用适配
-- ✅ 常用软件显示名/分类补充（Obsidian/Notion/Slack/Teams/企业微信/飞书/WhatsApp/LINE/Skype/Steam/Epic/Spotify/VLC/PowerToys/uTools 等）
-- ✅ 社交软件识别补充（企业微信/飞书/Slack/Teams/WhatsApp/LINE/Skype）
-- ✅ 浏览器适配补充（Vivaldi/Yandex/Chromium/Opera GX/Arc/Cent/2345/搜狗/傲游/Slimjet）
-- ✅ AI 工具识别补充（Codex/Goose/Amazon Q/DSH/pi/Claude Code/Gemini CLI/Continue/Bamboo/Augment/Warp）
-- ✅ 终端 TUI 工具补充（tmux/screen/btop/k9s/lazydocker/kubectl/ssh/curl/fzf/rg/ncdu/tig）
 
 ---
 
@@ -99,28 +89,35 @@
 | 2 | AI 会话解析精度 | 第三方工具格式差异较大，目前 best-effort，可能统计缺失 |
 | 3 | GitHub Pages 只做简单 landing | 如需完整文档站可继续扩展（当前够用） |
 | 4 | 周报/月报多语言 / UI 多语言 | 可选，当前 UI 中文 |
-| 5 | ROADMAP Phase 1 已落地（v2.3.0 规划） | 对话轮次/Token估算/按模型·项目拆分/会话详情面板/报告章节 ☆ 见 [docs/ROADMAP.md](docs/ROADMAP.md)；Phase 3 成本与 ROI、Phase 4 行为洞察（死循环/专注度/人格）已落地；Phase 2 的 Git 代码变更分析已落地，采纳率/留存率仍需 IDE 插件；Phase 3 时间节省估算（time_saved）随 v2.4.0 落地 |
+| 5 | ROADMAP Phase 2 采纳率/留存率 | 需 IDE 插件提供事件源；当前只有 Git 侧粗代理（adoption.py） |
+| 6 | 剩余约 19 处 except pass | 「日志自身失败」与 __main__ 入口兜底，按设计保持静默 |
 
 ---
 
 ## 已知限制
 
-- 管理员权限窗口标题：普通权限读取不到，可用 `monitor.py --admin` 以管理员运行
-- UWP/商店应用：已能识别包显示名，但部分应用仍可能按 exe 记录
+- 管理员权限窗口标题：普通权限读取不到，可用 `monitor.py --admin`
+- UWP/商店应用：已能识别包显示名，部分应用仍可能按 exe 记录
 - 后台标签页不计时（前台注意力口径）
 - 打包 exe 未代码签名，可能有杀软误报
 - Firefox 停留时长是估算值（相邻访问间隔，上限可配）
-- WSL 内运行的 CLI 工具会话文件不被自动扫描（可在 `ai_sessions.paths` 显式配 `\\wsl.localhost\...` UNC 路径）；各工具监控支持矩阵见 [docs/HARNESSES.md](docs/HARNESSES.md)
+- WSL 内运行的 CLI 工具会话文件不被自动扫描（可在 `ai_sessions.paths` 显式配 UNC 路径）
+- `shannon_entropy` 对负计数产出负熵（理论缺陷，全部调用点已核实恒非负，characterization 测试钉死）
 
 ---
 
 ## 交接备忘（环境/命令）
 
-- **代理**：`127.0.0.1:7897`；git 已配代理；gh 已登录（Niangaol）
-- **Python**：默认 `python`=3.14；带 PyInstaller 的 3.11 在
-  `C:\Users\niangao\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe`
+- **代理**：`127.0.0.1:7897`；git 已配代理
+- **GitHub token**：`powershell -File setup_gh_token.ps1`（把 GH_TOKEN/GITHUB_TOKEN 写进 PowerShell profile）；验证 `gh auth status`（账号 Niangaol，scopes: repo/workflow/read:org/gist）
+- **Python**：
+  - 跑测试/ruff：`C:\Python314\python.exe`（仓库根的 `python` 是内嵌精简运行时，**没有 pytest/ruff**，别用它跑测试）
+  - 打包 exe：带 PyInstaller 的 3.11 在 `C:\Users\niangao\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe`
+- **测试**：`C:\Python314\python.exe -m pytest tests -q -p no:cacheprovider -o addopts=""`
+  - 注意：`-q` 已在 pyproject addopts 里，显式传 `-o addopts=""` 才能看到 passed/failed 摘要行（否则只打印进度点）
+  - Windows 临时目录权限异常时，先清理 `%TEMP%\usagemon_hist_*` / `dsh-*`
+  - 测试隔离：api 用例必须传独立 `config_path`，否则会读到开发机仓库根 config.json（AI 开启→真实调用 LLM 挂到超时；CI 无此文件所以不暴露）
 - **构建**：`python -m PyInstaller VibeTrace.spec --noconfirm`（先停守护任务，exe 会被占用）
-- **测试**：`python -m pytest tests/ -q`（约670项全过；test_all.py 已并入退役）；`ruff check .`（0 违规）；`coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q && coverage report --fail-under=70`（实测 80%）；详见 `docs/TEST_WORKFLOW.md`
-  - 若 Windows 临时目录权限导致测试失败，可先清理 `%TEMP%\usagemon_hist_*` / `dsh-*`
-- **发布**：`git tag vX.Y.Z && git push origin vX.Y.Z` → CI 自动测试→构建→冒烟→Release
-- **守护**：计划任务 `VibeTrace`（exe）/`VibeTraceReport`（每日 19:30 日报）
+- **发布**：提交全部改动 → `git tag vX.Y.Z` → `git push origin master --tags` → CI 自动测试→构建→冒烟→Release（build.yml 监听 `v*` tag）
+- **守护**：计划任务 `VibeTrace`（exe）/ `VibeTraceReport`（每日 19:30 日报）
+- **工作区卫生**：仓库根有真实 `config.json`（含 api_key，已 gitignore，**严禁提交**）；评审报告 `review-*.md` 与内嵌 `Python/` 运行时均已 gitignore

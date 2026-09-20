@@ -12,6 +12,7 @@
 """
 
 from __future__ import annotations
+import applog  # v2.9.8：降级观测出口（applog.note）
 
 import argparse
 import datetime
@@ -113,8 +114,8 @@ def check_report_balloon(data_root: str, notify_fn) -> bool:
         _report_armed = False
         try:
             notify_fn()
-        except Exception:  # noqa: BLE001 —— 通知失败不影响守护
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— 通知失败不影响守护
+            applog.note(_exc, "monitor: 报表就绪托盘通知失败")
         return True
     return False
 
@@ -174,8 +175,8 @@ def _run_update_checker(data_root: str, config: dict, delay: float = 15.0) -> No
                 "发现新版本 v" + str(result.get("latest") or ""),
                 "点击托盘「检查更新」或打开仪表盘查看并安装",
             )
-    except Exception:  # noqa: BLE001 —— 更新检查失败静默
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 更新检查失败静默
+        applog.note(_exc, "monitor: 后台更新检查线程异常退出")
 
 
 # ---------------------------------------------------------------------------
@@ -276,8 +277,8 @@ def _close_session(session: dict, end_dt: datetime.datetime, data_root: str,
                 session["start"], end_dt, data_root, config)
             if url:
                 session["url"] = url
-        except Exception:  # noqa: BLE001 —— URL 关联失败不影响会话写入
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— URL 关联失败不影响会话写入
+            applog.note(_exc, "monitor: 会话 URL 关联失败（不影响会话记录写入）")
     rec = make_record(session, end_dt)
     if rec is None:
         return None
@@ -655,8 +656,8 @@ def open_dashboard(data_root: str, port: int = 8765, view: str | None = None,
                 subprocess.Popen(shell, env=env, creationflags=creationflags,
                                  close_fds=True)
                 return
-            except Exception:  # noqa: BLE001 —— 壳启动失败回退浏览器
-                pass
+            except Exception as _exc:  # noqa: BLE001 —— 壳启动失败回退浏览器
+                applog.note(_exc, "monitor: Electron 壳拉起失败，回退浏览器")
 
     sock = socket.socket()
     try:
@@ -665,8 +666,8 @@ def open_dashboard(data_root: str, port: int = 8765, view: str | None = None,
         # 已有 dashboard 实例在跑
         try:
             webbrowser.open(url)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "monitor: 仪表盘 serve_forever 提前返回")
         return
     finally:
         sock.close()
@@ -683,8 +684,8 @@ def open_dashboard(data_root: str, port: int = 8765, view: str | None = None,
     time.sleep(0.4)  # 等服务器绑定端口
     try:
         webbrowser.open(url)
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        applog.note(_exc, "monitor: 打开仪表盘整体失败")
 
 
 # ---------------------------------------------------------------------------

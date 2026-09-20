@@ -28,6 +28,7 @@
 """
 
 from __future__ import annotations
+import applog  # v2.9.8：降级观测出口（applog.note）
 
 import argparse
 import datetime
@@ -109,8 +110,8 @@ def _load_dashboard_token(data_root: str | None = None, config_path: str | None 
                     token = json.load(fh).get("dashboard_token")
                 if token:
                     return str(token).strip()
-        except Exception:  # noqa: BLE001 —— 数据根配置损坏时回退默认读取
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— 数据根配置损坏时回退默认读取
+            applog.note(_exc, "dashboard: 仪表盘口令读取失败，回退系统默认值")
     try:
         import classifier  # noqa: PLC0415
         cfg = classifier.load_config(config_path)
@@ -214,8 +215,8 @@ def _response_cache_refresh(key: tuple, compute: Callable[[], dict]) -> None:
     try:
         payload = compute()
         _response_cache_store(key, payload)
-    except Exception:  # noqa: BLE001 —— 刷新失败保留旧值，等下次过期再试
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 刷新失败保留旧值，等下次过期再试
+        applog.note(_exc, "dashboard: 响应缓存后台刷新失败，保留旧值")
     finally:
         with _RESPONSE_CACHE_LOCK:
             _RESPONSE_CACHE_REFRESHING.pop(key, None)
@@ -293,8 +294,8 @@ def _save_ai_settings(root: str, config_path: str | None, payload: dict) -> dict
             ai["base_url"] = preset.get("base_url", "")
         if not ai["model"]:
             ai["model"] = preset.get("model", "")
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        applog.note(_exc, "dashboard: AI 设置按预设补齐失败（base_url/model 可能为空）")
     new_key = str(payload.get("api_key") or "").strip()
     if new_key:
         ai["api_key"] = new_key
@@ -1169,8 +1170,8 @@ class Handler(BaseHTTPRequestHandler):
             # v2.7「简单学习」：个性化基线异常（Welford/z-score，越用越准）
             try:
                 rules.extend(insights.baseline_insights(root, date, agg, config))
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                applog.note(_exc, "dashboard: 概览 insights 预计算部分字段失败")
             ins_cfg = config.get("insights") if isinstance(config.get("insights"), dict) else {}
             ai_cfg = ins_cfg.get("ai") if isinstance(ins_cfg.get("ai"), dict) else {}
             ai_enabled = bool(ins_cfg.get("enabled", True) and ai_cfg.get("enabled"))
@@ -1550,8 +1551,8 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if length > 0:
                     self.rfile.read(min(length, 1 << 20))  # 有界排空（防超大 body 拖死）
-            except Exception:  # noqa: BLE001 —— 排空失败也照常拒绝
-                pass
+            except Exception as _exc:  # noqa: BLE001 —— 排空失败也照常拒绝
+                applog.note(_exc, "dashboard: 备份恢复临时目录清理失败")
             self.close_connection = True
             self._send_json({"error": "bad body"}, 400)
             return

@@ -24,6 +24,17 @@ _MERGE_INT_KEYS = (
 _MERGE_FLOAT_KEYS = ("cost_in", "cost_out", "cost_total")
 
 
+def _new_bucket() -> dict:
+    """新建一个全 0 统计桶（字段集由 _MERGE_INT_KEYS / _MERGE_FLOAT_KEYS 决定）。
+
+    历史上桶字段在这里硬编码一份，与下方两个 KEYS 元组重复定义——曾因
+    漏同步缓存三分项而出过事故。现收敛为同一处生成，加字段只改 KEYS。
+    """
+    bucket: dict = {ck: 0 for ck in _MERGE_INT_KEYS}
+    bucket.update({fk: 0.0 for fk in _MERGE_FLOAT_KEYS})
+    return bucket
+
+
 def merge_dim(target: dict, src: dict) -> None:
     """把同维度的统计 dict（by_model / by_project）逐字段累加进 target。
 
@@ -32,13 +43,12 @@ def merge_dim(target: dict, src: dict) -> None:
     （旧数据没有缓存三分项等新字段也不能报错）。
     """
     for key, e in (src or {}).items():
-        t = target.setdefault(key, {"turns": 0, "tokens_in": 0, "tokens_out": 0,
-                                    "tokens_total": 0, "cost_in": 0.0, "cost_out": 0.0,
-                                    "cost_total": 0.0})
+        t = target.setdefault(key, _new_bucket())
         for ck in _MERGE_INT_KEYS:
             t.setdefault(ck, 0)
             t[ck] += int(e.get(ck) or 0)
         for fk in _MERGE_FLOAT_KEYS:
+            t.setdefault(fk, 0.0)  # 调用方自建的桶可能不含全部 float 键（对齐 docstring 承诺）
             t[fk] += float(e.get(fk) or 0)
 
 

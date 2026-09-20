@@ -116,6 +116,7 @@ python monitor.py --admin   # auto UAC elevation when not running as admin
 - Daily goals (v2.7 · optional): total active / coding time targets with streak counter, overview progress panel, off by default
 - Adoption proxy (v2.8 · reference only): Git-side retention / rework rough proxies (`/api/adoption`), shown collapsed & greyed-out with a mandatory disclaimer; confidence never "high"; AI-side per-file attribution cut per the spike conclusion
 - Constrained queries expanded (v2.8): new templates for period-over-period output comparison, best-focus day, and cost trend, with dual-period parsing and period aliases
+- Degradation observability (v2.9.12): 34 intentionally-swallowed exceptions now land in `logs/app.log` and are visible in the dashboard's Log view — when the numbers don't add up you can find out why (behavior unchanged: still no raise, still degraded)
 
 ### Adaptation
 
@@ -188,18 +189,44 @@ No build step, no framework — Python standard-library `http.server` + vanilla 
 monitor.py         daemon (foreground polling, tray, cross-day aggregation, --admin)
 win32core.py       Win32 API (ctypes): foreground window / processes / idle / UWP / admin check
 classifier.py      classification, contacts, AI tools, terminal tools, config loading
+inventory.py       software inventory scan & auto-classification
 report.py          daily/weekly/monthly aggregation, reclassify, verify/repair (SQLite fast path)
 dashboard.py       local web dashboard + all /api/* routes
-browser_history.py Chromium + Firefox history parsing (incl. Firefox dwell estimate)
+dashboard_util.py  pure functions/utilities for dashboard.py
+browser_history.py Chromium + Firefox history parsing (direct read of source DB, no copy)
 insights.py        smart insights (offline rules + optional AI)
-ai_sessions.py     AI session deep stats
+ai_sessions.py     AI session deep stats (tokens / cost / quality score)
+git_insights.py    Git change analysis (range-batched git log)
+derived.py         shared data-access framework for derived metrics (day_bundle / series, v2.9.8)
+metrics_util.py    single source of truth for stats helpers (entropy / HHI / switch count / merge / format)
+tool_registry.py   tool registry (single source of truth: default dirs / parsers / cache exemptions / web domains)
+tool_compare.py    multi-tool comparison
+growth.py          growth curve / weekly snapshots
+query.py           constrained template queries (regex allowlist, no LLM)
+advice.py          overview "Advice" column (optional, off by default)
+adoption.py        Git-side adoption proxy metrics (read-only, disclaimer + collapsed)
+budget.py          cost budget alerts
+alerts.py          alert scheduling (budget / break reminders, tray balloon loop)
+goals.py           daily goals & streaks
+learn.py           online statistical baseline (sliding window + z-score)
+timeline.py        Vibe timeline replay
 sqlite_store.py    optional SQLite backend + consistency check
 updater.py         update check, in-app update, download URL allowlist
 tray.py            tray icon
-paths.py / applog.py  path resolution / rolling logs
+paths.py / applog.py / version.py   path resolution / rolling logs + degradation notes / unified version
 ```
 
 State lives outside the repo in a runtime directory (date folders + `usage.jsonl`).
+
+> Performance: AI session stats, browser history and SQLite mirror writes all use
+> **fingerprint caches / shared connections** (auto-invalidate on mtime+size change,
+> behavior unchanged), and the dashboard computes repeated multi-endpoint aggregation
+> only once — AI session and browser-history hot paths are ~200× / ~144× faster,
+> SQLite writes ~66×. Browser URL association now **reads the source DB directly with
+> no full copy** (6.1ms → 0.49ms per call, ~12×); multi-day Git analysis is
+> **range-batched** (one `git log` bucketed by committer date; 44 days ≈9.2s → ≈1.4s);
+> derived metrics go through the shared `derived.py` framework (13 per-day loops
+> converged into one implementation).
 
 ---
 
@@ -219,7 +246,7 @@ Each phase can be delivered independently. Full plan: [docs/ROADMAP.md](docs/ROA
 ## Running tests
 
 ```powershell
-python -m pytest tests -q   # ~670 test cases (unit / integration / API / security / performance / full-chain E2E)
+python -m pytest tests -q   # ~890 test cases (unit / integration / API / frontend / security / performance / full-chain E2E; measured 882 passed / 7 skipped)
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 violations

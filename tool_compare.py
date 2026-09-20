@@ -28,8 +28,9 @@ from typing import Any
 
 import ai_sessions  # 只读复用（collect / quality_grade）
 import metrics_util  # 统计辅助单一来源：熵/HHI/维度合并/等级名（纯函数，无业务依赖）
-import report  # 只读复用（aggregate → by_ai / sessions）
+import report  # noqa: F401  仅供测试 monkeypatch.setattr(tool_compare.report, ...) 打桩用
 import tool_registry  # 只读复用（resolve_tool：两套工具命名的 join 收敛）
+import derived  # 取数框架（v2.9.8）：多日 agg/ai 取数收敛
 
 # ---------------------------------------------------------------------------
 # 默认配置（读 config.tool_compare；风格对齐 git_insights.git_config）
@@ -346,15 +347,14 @@ def compare_tools(days: list[str], data_root: str, config: dict,
     # 批作用域（v2.9 性能修复，同 query.run_query 先例）：整段逐日循环共享一次
     # 目录指纹/枚举，N 天区间不再 N 次全树扫盘；批外/批内返回结果语义完全不变。
     with ai_sessions.collect_fingerprint_batch():
+        # v2.9.8：取数走 derived.series（返回近到远，需反转为 days 的升序）；
+        # 单日源失败时 derived 已跳过该日，与原先 try/except 置 None 等效。
+        bundles = derived.series(days=days, data_root=data_root, config=config, need=derived.NEED_AGG | derived.NEED_AI)
+        agg_by_day = {b["date"]: b.get("agg") for b in bundles}
+        ai_by_day = {b["date"]: b.get("ai") for b in bundles}
         for day in days:
-            try:  # best-effort：单日任何源失败仅跳过，不拖垮整体（对齐 timeline 降级）
-                col = ai_sessions.collect(day, config)
-            except Exception:  # noqa: BLE001
-                col = None
-            try:
-                agg = report.aggregate(day, data_root)
-            except Exception:  # noqa: BLE001
-                agg = None
+            col = ai_by_day.get(day)
+            agg = agg_by_day.get(day)
             by_ai = (agg or {}).get("by_ai") or {}
             by_ai_ms = _by_ai_minutes(by_ai)
             for tool, stats in ((col or {}).get("tools") or {}).items():

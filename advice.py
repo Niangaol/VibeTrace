@@ -179,23 +179,18 @@ def _past_costs(date_str: str, config: dict, ai_sessions_mod) -> list:
     """前 7 日各自的成本（仅取有数据的日）；用于成本异常对比。
 
     批作用域共享一次目录指纹（同 query/budget 先例），避免逐日重复全树扫描。
+    v2.9.8：取数走 derived.series（include_today=False 即原 range(1, 8) 语义）。
     """
-    import datetime  # noqa: PLC0415
-    try:
-        base = datetime.date.fromisoformat(date_str)
-    except (TypeError, ValueError):
-        return []
+    import derived  # noqa: PLC0415  取数框架（v2.9.8）
     out: list = []
     with ai_sessions_mod.collect_fingerprint_batch():
-        for off in range(1, 8):
-            day = (base - datetime.timedelta(days=off)).isoformat()
-            data = _safe(lambda d=day: ai_sessions_mod.collect(d, config, web_visits=[]), {}) or {}
+        for b in derived.series(date_str, None, 7, config, need=derived.NEED_AI,
+                               include_today=False):
+            data = b.get("ai") or {}
             cost = float(((data.get("total") or {}).get("cost_total")) or 0.0)
             if cost > 0:
                 out.append(cost)
     return out
-
-
 def advice_for_day(date_str: str, data_root: str, config: dict) -> dict:
     """当日建议（可选功能；关闭时返回 enabled=false 空态，零额外开销）。
 

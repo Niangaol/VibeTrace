@@ -117,6 +117,7 @@ python monitor.py --admin   # 非管理员时自动弹 UAC 提权重启
 - 每日目标（v2.7 · 可选）：总活跃/编码时长目标 + 连续达成天数，概览页进度面板，默认关闭
 - 采纳率代理（v2.8 · 仅参考）：Git 侧 retention / 返工率粗代理（`/api/adoption`），洞察页折叠 + 灰色降权 + 强制免责声明，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍
 - 受限查询扩充（v2.8）：新增「今日产出 vs 昨日」「本周专注度最佳日」「成本趋势」模板，支持双周期对比与周期别名
+- 降级可观测（v2.9.12）：34 处「有意降级」的静默异常统一落盘 `logs/app.log`，仪表盘「日志」视图可直接看到——统计数字对不上时能查到原因（行为不变：仍不抛异常、仍然降级）
 
 ### Adaptation
 
@@ -186,18 +187,34 @@ VibeTrace.exe --dashboard --open   # exe 方式
 No build step、无框架 —— Python 标准库 `http.server` + vanilla JS。核心模块：
 
 ```
-monitor.py         守护进程（轮询前台窗口、托盘、跨天聚合、--admin）
-win32core.py       Win32 API（ctypes）：前台窗口 / 进程 / 空闲 / UWP / 管理员检测
-classifier.py      分类、联系人、AI 工具、终端工具、配置加载
-report.py          日报/周报/月报聚合、重分类、校验修复（含 SQLite 快速路径）
-dashboard.py       本地网页仪表盘 + 全部 /api/* 路由
-browser_history.py Chromium + Firefox 历史解析（含 Firefox 停留时长估算）
-insights.py        智能洞察（离线规则 + 可选 AI）
-ai_sessions.py     AI 会话深度统计
-sqlite_store.py    可选 SQLite 后端 + 一致性校验
-updater.py         新版本检测、应用内更新、下载地址白名单
-tray.py            托盘图标
-paths.py / applog.py  路径解析 / 滚动日志
+monitor.py          守护进程（轮询前台窗口、托盘、跨天聚合、--admin）
+win32core.py        Win32 API（ctypes）：前台窗口 / 进程 / 空闲 / UWP / 管理员检测
+classifier.py       分类、联系人、AI 工具、终端工具、配置加载
+inventory.py        软件清单扫描与自动分类
+report.py           日报/周报/月报聚合、重分类、校验修复（含 SQLite 快速路径）
+dashboard.py        本地网页仪表盘 + 全部 /api/* 路由
+dashboard_util.py   dashboard 的纯函数/工具模块
+browser_history.py  Chromium + Firefox 历史解析（免拷贝直读源库）
+insights.py         智能洞察（离线规则 + 可选 AI）
+ai_sessions.py      AI 会话深度统计（Token / 成本 / 质量评分）
+git_insights.py     Git 代码变更分析（区间批量 range_batch）
+derived.py          派生指标共用取数框架（day_bundle / series，v2.9.8）
+metrics_util.py     统计辅助单一来源（熵 / HHI / 切换计数 / 维度合并 / 格式化）
+tool_registry.py    工具注册表（唯一事实源：默认目录/解析器/缓存豁免/Web 域名）
+tool_compare.py     多工具横向对比
+growth.py           能力成长曲线 / 周快照
+query.py            受限模板查询（正则白名单，不嵌大模型）
+advice.py           概览「建议」栏位（可选功能，默认关闭）
+adoption.py         Git 侧采纳率代理指标（只读，免责+折叠展示）
+budget.py           成本预算告警
+alerts.py           告警调度（预算 / 久坐提醒，托盘气泡闭环）
+goals.py            每日目标与连续达成
+learn.py            在线统计基线（滑动窗口 + z-score）
+timeline.py         Vibe 时间轴回放
+sqlite_store.py     可选 SQLite 后端 + 一致性校验
+updater.py          新版本检测、应用内更新、下载地址白名单
+tray.py             托盘图标
+paths.py / applog.py / version.py   路径解析 / 滚动日志 + 降级观测 / 统一版本号
 ```
 
 状态默认存在仓库外的运行目录（日期文件夹 + `usage.jsonl`）。
@@ -205,6 +222,9 @@ paths.py / applog.py  路径解析 / 滚动日志
 > 性能：AI 会话统计、浏览器历史、SQLite 镜像写入均带**指纹缓存/共享连接**
 > （mtime+size 变化自动失效，行为不变），仪表盘多端点重复聚合只算一次——
 > AI 会话与浏览器历史热路径各提速约 200× / 144×，SQLite 写入约 66×。
+> 浏览器 URL 关联**免整库拷贝**直读源库（6.1ms → 0.49ms/次，约 12×）；
+> Git 多日分析**区间批量**（一次 git log 按 committer date 分桶，44 天约 9.2s → 1.4s）；
+> 派生指标走共用取数框架 `derived.py`（13 处逐日循环收敛为单一实现）。
 
 ---
 
@@ -233,7 +253,7 @@ AI 编程深度追踪规划：
 
 
 ```powershell
-python -m pytest tests -q   # 约670项用例（单测/集成/API/安全/性能/E2E 全链路）
+python -m pytest tests -q   # 约890项用例（单测/集成/API/前端/安全/性能/E2E 全链路；实测 882 passed / 7 skipped）
 coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -q
 coverage report --fail-under=70
 ruff check .                # 0 违规

@@ -8,6 +8,7 @@
 """
 
 from __future__ import annotations
+import applog  # v2.9.8：降级观测出口（applog.note）
 
 import argparse
 import calendar
@@ -640,8 +641,8 @@ def _insights_section(agg: dict, date_str: str, data_root: str,
         # v2.7「简单学习」：个性化基线异常（Welford/z-score）
         try:
             rules.extend(insights.baseline_insights(data_root, date_str, agg, config))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "report: 洞察小节渲染失败，跳过该小节")
         # 行为洞察（Phase 4 · 离线）：专注度评分 + 死循环检测
         behavior = insights.behavior_insights(agg, config)
         behavior_lines: list[str] = []
@@ -689,8 +690,8 @@ def _insights_section(agg: dict, date_str: str, data_root: str,
                     behavior_lines.append(
                         f"  - {repo['name']}: {repo['commit_count']} 次提交，"
                         f"+{repo['lines_added']} / -{repo['lines_deleted']} 行")
-        except Exception:  # noqa: BLE001 —— Git 分析缺失/失败不拖垮日报
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— Git 分析缺失/失败不拖垮日报
+            applog.note(_exc, "report: Git 深度小节渲染失败，跳过该小节")
 
         rule_lines = [f"- [{r['title']}] {r['detail']}" for r in rules]
         if not behavior_lines and not rule_lines:
@@ -878,8 +879,8 @@ def aggregate_days(date_strs: list[str], data_root: str) -> dict:
             rows = sqlite_store.query_range(data_root, date_strs[0], date_strs[-1])
             if rows:
                 return _aggregate_records(rows, "~".join(date_strs), data_root)
-    except Exception:  # noqa: BLE001 —— SQLite 失败回退 JSONL
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— SQLite 失败回退 JSONL
+        applog.note(_exc, "report: SQLite 多日快路失败，回退 JSONL 逐日聚合")
     return _aggregate_days(date_strs, data_root)
 
 
@@ -943,8 +944,8 @@ def aggregate_month(month_str: str, data_root: str) -> dict:
                                         "count": a["session_count"]})
                 agg["per_day"] = per_day
                 return agg
-    except Exception:  # noqa: BLE001 —— SQLite 失败回退 JSONL
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— SQLite 失败回退 JSONL
+        applog.note(_exc, "report: SQLite 月报快路失败，回退 JSONL 逐日聚合")
 
     days = [
         d for d in days
@@ -1022,8 +1023,8 @@ def generate_month_report_md(month_str: str, data_root: str,
         if bmd:
             out.append("")
             out.append(bmd)
-    except Exception:  # noqa: BLE001 —— 预算小结失败不影响月报主体
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 预算小结失败不影响月报主体
+        applog.note(_exc, "report: 月报缩略图生成失败")
     if len(out) <= 3:
         out.append("（当月无数据）")
     return "\n".join(out)
@@ -1256,8 +1257,8 @@ def main(argv: list[str] | None = None) -> int:
             bmd = budget.budget_week_summary(days, data_root, config)
             if bmd:
                 week_md = week_md + chr(10) + chr(10) + bmd
-        except Exception:  # noqa: BLE001 —— 预算小结失败不影响周报主体
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— 预算小结失败不影响周报主体
+            applog.note(_exc, "report: 预览图生成失败（不影响主输出）")
         if args.json:
             print(json.dumps(agg, ensure_ascii=False, indent=2, default=str))
         else:

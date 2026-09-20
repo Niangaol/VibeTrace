@@ -17,6 +17,7 @@ import ctypes
 import ctypes.wintypes as wt
 import os
 import sys
+import applog  # noqa: E402
 import paths  # noqa: E402
 
 user32 = ctypes.windll.user32
@@ -231,8 +232,8 @@ def _delete_icon(hwnd: int) -> None:
         nid.hWnd = wt.HWND(hwnd)
         nid.uID = ID_TRAY
         shell32.Shell_NotifyIconW(NIM_DELETE, ctypes.byref(nid))
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        applog.note(_exc, "tray: 删除托盘图标失败（可能残留，下次创建会覆盖）")
 
 
 def show_balloon(title: str, text: str) -> None:
@@ -254,8 +255,8 @@ def show_balloon(title: str, text: str) -> None:
             ver.uID = ID_TRAY
             ver.uTimeoutOrVersion = NOTIFYICON_VERSION  # uVersion=3
             shell32.Shell_NotifyIconW(NIM_SETVERSION, ctypes.byref(ver))
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "tray: 设置气泡超时版本失败，沿用默认")
         nid = NOTIFYICONDATAW()
         nid.cbSize = ctypes.sizeof(NOTIFYICONDATAW)
         nid.hWnd = wt.HWND(_hwnd)
@@ -266,8 +267,8 @@ def show_balloon(title: str, text: str) -> None:
         nid.uTimeoutOrVersion = 10000  # 经典枚举：气泡停留毫秒数（>= Win2000）
         nid.dwInfoFlags = NIIF_INFO
         shell32.Shell_NotifyIconW(NIM_MODIFY, ctypes.byref(nid))
-    except Exception:  # noqa: BLE001 —— 气泡失败不影响守护
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 气泡失败不影响守护
+        applog.note(_exc, "tray: 托盘气泡通知失败")
 
 
 def _popup_menu(hwnd: int) -> None:

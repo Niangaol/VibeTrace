@@ -71,6 +71,42 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(f"usagemon.{name}")
 
 
+
+# ---------------------------------------------------------------------------
+# 「有意降级」异常的观测出口
+# ---------------------------------------------------------------------------
+# 全项目 30+ 处按设计必须继续执行的 except Exception: ... pass（DNS 失败、
+# 第三方会话文件损坏、Win32 调用被拒、SQLite 快路回退等）历史上完全无痕迹，
+# 表现为「统计数字对不上却查不到原因」。这些点统一改走 note() 留一行日志：
+# 行为不变（仍然不抛、仍然降级），只是从不可观测变为可观测。
+_DEGRADE = logging.getLogger("usagemon.降级")
+_DEGRADE.addHandler(logging.NullHandler())   # 未 configure() 前保持安静
+_DEGRADE.setLevel(logging.WARNING)           # 只放行 warning 及以上
+_DEGRADE.propagate = True                    # configure() 后随 usagemon handler 落盘
+
+_NOTE_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+
+def note(exc, ctx, level="warning"):
+    """记录被有意吞掉的异常（ctx 描述位置与业务影响）。只记录，不抛出。
+
+    - configure() 之后：随 applog 写入 <data_root>/logs/app.log，
+      仪表盘「日志」视图可直接看到，便于排查数据偏差。
+    - configure() 之前（CLI / 测试环境）：NullHandler 兜底，无任何输出，
+      保持原有安静行为。
+    - 本函数自身永不抛异常——观测失败绝不能影响主体功能。
+    """
+    try:
+        _DEGRADE.log(_NOTE_LEVELS.get(level, logging.WARNING), "%s: %r", ctx, exc)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def log_path(data_root: str) -> str:
     """当前日志文件路径（未初始化时按目录推断）。"""
     return os.path.join(data_root, "logs", "app.log")

@@ -33,6 +33,7 @@ import git_insights  # 只读复用（git_insights → Git 产出）
 import insights  # 只读复用（behavior_insights → focus_score）
 import report  # 只读复用（aggregate → by_ai 前台分钟 / sessions）
 import tool_registry  # 只读复用（resolve_tool：tool 参数的两套命名归一）
+import derived  # 只读复用（取数框架 v2.9.8：series/day_bundle 按天取齐多源数据）
 
 # ---------------------------------------------------------------------------
 # 默认配置（读 config.query；风格对齐 tool_compare.compare_config）
@@ -472,8 +473,11 @@ def _resolve_top(days: list[str], params: dict, data_root: str, config: dict) ->
 def _focus_per_day(days: list[str], data_root: str, config: dict) -> list[dict]:
     """逐日 focus_score（仅 total_active_ms>0 的天计分；q3 / q7 共用）。"""
     rows: list[dict] = []
+    # v2.9.8：逐日取数走 derived.series（只取 AGG 源；series 近到远返回，按日期回填保持 rows 升序）
+    bundles = derived.series(days=days, data_root=data_root, need=derived.NEED_AGG)
+    agg_by_day = {b["date"]: b.get("agg") for b in bundles}
     for day in days:
-        agg = _agg(day, data_root)
+        agg = agg_by_day.get(day)
         focus = 0
         if isinstance(agg, dict) and int(agg.get("total_active_ms") or 0) > 0:
             try:
@@ -660,8 +664,11 @@ def _resolve_cost_trend(days: list[str], params: dict, data_root: str, config: d
     全零 → rows=[] 空态（200 可展示，不 500）。
     """
     rows: list[dict] = []
+    # v2.9.8：取数走 derived.series（返回近到远，需反转为 days 的升序）
+    bundles = derived.series(days=days, data_root=data_root, config=config, need=derived.NEED_AI)
+    ai_by_day = {b["date"]: b.get("ai") for b in bundles}
     for day in days:
-        col = _collect(day, config)
+        col = ai_by_day.get(day) or {}
         total = (col or {}).get("total") or {}
         cost = float(total.get("cost_total") or 0)
         tokens = int(total.get("tokens_total") or 0)

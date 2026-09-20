@@ -31,6 +31,7 @@
 """
 
 from __future__ import annotations
+import applog  # v2.9.8：降级观测出口（applog.note）
 
 import datetime
 import sys
@@ -251,8 +252,8 @@ def _tick(ctx: _Ctx, state: AlertState, now: float | None = None) -> dict:
     for alert in evaluate_alerts(cfg, state, now, budget_st, paused=False):
         try:
             ctx.notify(alert["title"], alert["text"])
-        except Exception:  # noqa: BLE001 —— 单条通知失败不中断调度
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— 单条通知失败不中断调度
+            applog.note(_exc, "alerts: 告警配置加载失败，本轮跳过")
     return cfg
 
 
@@ -272,8 +273,8 @@ def run_alert_loop(stop_event, data_root: str, config_path: str | None = None,
                 import applog  # noqa: PLC0415
                 applog.get_logger("alerts").error("alert tick failed: %s",
                                                   sys.exc_info()[1])
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as _exc:  # noqa: BLE001
+                applog.note(_exc, "alerts: 告警调度执行失败，本轮跳过")
             cfg = alerts_config(ctx.load_config()) if ctx else {}
         interval = max(10, int(cfg.get("check_interval_s", 60))) if cfg else 60
         stop_event.wait(interval)

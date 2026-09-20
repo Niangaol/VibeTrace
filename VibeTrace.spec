@@ -21,7 +21,7 @@ a = Analysis(
     hiddenimports=['insights', 'updater', 'sqlite_store', 'ai_sessions',
                    'timeline', 'budget', 'tool_compare', 'growth', 'query', 'adoption',
                    'advice', 'dashboard', 'dashboard_util', 'goals', 'metrics_util',
-                   'tool_registry', 'git_insights', 'alerts', 'learn', 'applog',
+                   'tool_registry', 'git_insights', 'alerts', 'learn', 'applog', 'derived',
                    'browser_history', 'classifier', 'report', 'tray', 'paths',
                    'version', 'win32core', 'inventory',
                    'zstandard'] + _zstd_hidden,

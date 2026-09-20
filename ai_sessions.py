@@ -44,6 +44,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 
+import applog  # noqa: E402
 import metrics_util  # 统计辅助单一来源：GRADE_NAMES / fmt_usd / merge_dim 等（纯函数，无业务依赖）
 import tool_registry  # 工具注册表（唯一事实源）：默认目录/解析器/缓存豁免/指纹特判/Web 域名
 
@@ -771,8 +772,8 @@ def _pricing_table(config: dict) -> dict:
             with open(fpath, "r", encoding="utf-8-sig") as fh:
                 raw = json.load(fh)
             _merge_pricing(table, raw)
-        except Exception:  # noqa: BLE001 —— 定价文件损坏时忽略，不影响主流程
-            pass
+        except Exception as _exc:  # noqa: BLE001 —— 定价文件损坏时忽略，不影响主流程
+            applog.note(_exc, "ai_sessions: 定价文件解析失败，回退内置定价表（成本可能偏低）")
     return table
 
 

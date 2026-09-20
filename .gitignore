@@ -71,3 +71,14 @@ baselines.json
 # 仓库只维护模板 config.default.json，安装器在 config.json 缺失时自动从模板生成。
 # 历史版本曾跟踪 config.json —— 那会让设置页写入的明文密钥随提交公开，故取消跟踪。
 config.json
+
+# ===== 本机内嵌 Python 运行时（py launcher 安装根，约 170MB，绝不入库）=====
+/Python/
+Python/
+pythoncore-*-*/
+_scan_ls.txt
+
+# ===== 评审产物（一次性报告，不入库）=====
+review-*.md
+_pt.log
+_tail.txt

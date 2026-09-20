@@ -16,12 +16,15 @@ CLI：python git_insights.py --day 2026-08-18 [--config path] [--json]
 
 from __future__ import annotations
 
-import argparse
-import datetime
-import json
-import os
-import subprocess
-import sys
+NOTICE_NO_COMMIT = "已配置 Git 仓库，但当天没有本地提交"  # 空态提示（批内/批外共用）
+
+import argparse  # noqa: E402
+import datetime  # noqa: E402
+import json  # noqa: E402
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import contextlib  # noqa: E402
+import sys  # noqa: E402
 
 import classifier  # noqa: E402
 import paths  # noqa: E402
@@ -121,7 +124,9 @@ def _parse_numstat(raw: str) -> list[dict]:
       <add>\t<del>\t<file>
       ...
       （空行分隔）
-    返回 [{hash, date, author, files:[{path, added, deleted}]}]。
+    返回 [{hash, date, author, cd, files:[{path, added, deleted}]}]。
+    cd = committer date：区间批量查询按它分桶（rebase/amend 后与 author date
+    可能不同天）。旧调用方不读 cd，完全兼容。
     """
     commits: list[dict] = []
     if not raw:
@@ -136,6 +141,8 @@ def _parse_numstat(raw: str) -> list[dict]:
         if len(parts) < 3:
             continue
         commit: dict = {"hash": parts[0].strip(), "date": parts[1].strip(),
+                        "cd": (parts[3].strip() if len(parts) > 3
+                               else parts[1].strip()),
                         "author": parts[2].strip(), "files": []}
         for ln in lines[1:]:
             fields = ln.split("\t")
@@ -334,23 +341,11 @@ def analyze_repo_deep(repo: dict, day_str: str, timeout: float, top_files: int,
     return base
 
 
-def analyze_repo(repo: dict, day_str: str, timeout: float, top_files: int) -> dict:
-    """统计单个仓库在 day_str 当天（本地时区 00:00:00–23:59:59）的提交与变更。
+def _stats_from_commits(repo: dict, commits: list[dict], top_files: int) -> dict:
+    """把提交列表聚合成单日统计（analyze_repo / 区间批量共用）。
 
-    返回含 commit_count / lines_added / lines_deleted / churn / files /
-    top_files / authors / modify_ratio 的 dict；非仓库或失败时返回 None。
+    commits 必须是**已按天过滤过**的提交；分桶由调用方负责。
     """
-    path = repo["path"]
-    if not _is_repo(path):
-        return None
-    since = f"{day_str} 00:00:00"
-    until = f"{day_str} 23:59:59"
-    args = ["log", f"--since={since}", f"--until={until}",
-            "--date=iso", "--pretty=format:%x1e%H%x1f%ad%x1f%an", "--numstat"]
-    out = _run_git(args, path, timeout)
-    if out is None:
-        return None
-    commits = _parse_numstat(out)
     added = sum(f["added"] for c in commits for f in c["files"])
     deleted = sum(f["deleted"] for c in commits for f in c["files"])
     churn = added + deleted
@@ -367,7 +362,7 @@ def analyze_repo(repo: dict, day_str: str, timeout: float, top_files: int) -> di
     modify_ratio = (deleted / churn) if churn > 0 else 0.0
     return {
         "name": repo["name"],
-        "path": path,
+        "path": repo["path"],
         "commit_count": len(commits),
         "lines_added": added,
         "lines_deleted": deleted,
@@ -379,59 +374,187 @@ def analyze_repo(repo: dict, day_str: str, timeout: float, top_files: int) -> di
     }
 
 
-def git_insights(config: dict, day_str: str, ai_project_files: list[str] | None = None) -> dict:
-    """汇总指定日期的 Git 产出（ROADMAP Phase 2 · 代码变更分析）。
+def _git_log_numstat(repo_path: str, since: str, until: str, timeout: float) -> list[dict] | None:
+    """跑一次 git log --numstat（区间或单日）；失败返回 None。
 
-    支持：
-    - auto_discover：对目录型 project 自动递归发现子仓库（深度≤3）
-    - deep：启用深度分析（author_detail/commit_rhythm/adoption_proxy 等）
-    - ai_project_files：ai_sessions 当天涉及的项目文件路径（用于 adoption_proxy 计算）
+    v2.9.11：--pretty 里补 %cd（committer date），供区间查询按天分桶。
+    """
+    args = ["log", f"--since={since}", f"--until={until}",
+            "--date=iso",
+            "--pretty=format:%x1e%H%x1f%ad%x1f%an%x1f%cd", "--numstat"]
+    out = _run_git(args, repo_path, timeout)
+    if out is None:
+        return None
+    return _parse_numstat(out)
+
+
+def analyze_repo(repo: dict, day_str: str, timeout: float, top_files: int) -> dict | None:
+    """统计单个仓库在 day_str 当天的提交与变更（原有行为不变）。"""
+    path = repo["path"]
+    if not _is_repo(path):
+        return None
+    commits = _git_log_numstat(path, f"{day_str} 00:00:00", f"{day_str} 23:59:59", timeout)
+    if commits is None:
+        return None
+    return _stats_from_commits(repo, commits, top_files)
+
+
+
+
+# ---------------------------------------------------------------------------
+# 区间批量（v2.9.11 性能修复）
+# ---------------------------------------------------------------------------
+# growth / report 等多日场景原先对每一天各跑一次 git log 子进程：每个仓库
+# 每天一次，auto_discover 开启时每天还递归 walk 目录。
+# range_batch(days) 把区间压成一次 git log --since/--until，再按 committer
+# date（%cd）分桶回填；块内 git_insights() 直接查表，语义与逐日一致
+# （见 tests/unit/test_git_range_batch.py 的等价性断言）。
+_RANGE_BATCH = None
+
+
+def _batch_key(config: dict, days: list[str]) -> tuple:
+    """批键：配置指纹 + 日期区间。配置变更或区间不同都另起一批。"""
+    import json  # noqa: PLC0415
+
+    try:
+        cfg_sig = json.dumps(config or {}, sort_keys=True, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        cfg_sig = repr(config)
+    return (cfg_sig, min(days) if days else "", max(days) if days else "")
+
+
+@contextlib.contextmanager
+def range_batch(days):
+    """多日区间批量上下文：块内 git_insights() 共用一次 git log。
+
+    用法（growth._aggregate_week）：
+        with git_insights.range_batch(days):
+            for day in days:
+                git_insights.git_insights(config, day)   # 块内命中批表
+
+    与 ai_sessions.collect_fingerprint_batch 同风格：块外/块内返回结果
+    完全一致，只是块内不再重复跑子进程。同区间嵌套时复用外层结果。
+    """
+    global _RANGE_BATCH
+    days = list(days or [])
+    if not days:
+        yield
+        return
+    outer = _RANGE_BATCH
+    if outer is not None and outer.get("days") == days:
+        yield
+        return
+    _RANGE_BATCH = {"days": days}  # 表格按 _batch_key(config, days) 延迟建并缓存
+    try:
+        yield
+    finally:
+        _RANGE_BATCH = outer
+
+
+def _batched_day_result(config: dict, day_str: str,
+                        ai_project_files: list[str] | None) -> dict | None:
+    """区间批内取某一天的结果；不在批内则返回 None。
+
+    批表按配置指纹 + 日期区间缓存（_batch_key）：同批内换了
+    config（不同仓库/开关 deep）会重建表，不会拿到上一份的缓存。
+    """
+    batch = _RANGE_BATCH
+    if batch is None:
+        return None
+    key = _batch_key(config, batch["days"])
+    entry = batch.get(key)
+    if entry is None:
+        entry = _build_day_table(batch["days"], config, ai_project_files)
+        batch[key] = entry
+    return entry.get(day_str)
+
+
+def _build_day_table(days: list[str], config: dict,
+                     ai_project_files: list[str] | None) -> dict:
+    """一次跑完区间 git log，按 committer date 分桶成 {day: git_insights 结果}。
+
+    与逐日 git_insights() 严格等价：deep 模式同样走 analyze_repo_deep 并补齐
+    deep_work_summary；降级 notice 文案与逐日路径一致；汇总逻辑复用
+    _assemble_result，避免两处公式漂移。
     """
     gc = git_config(config)
-    empty = {"enabled": gc["enabled"], "found": False, "repos": [],
-             "total": {"commit_count": 0, "lines_added": 0, "lines_deleted": 0,
-                       "churn": 0, "files": 0, "modify_ratio": 0.0},
-             "notice": "未配置 Git 仓库（insights.git.projects）或已关闭"}
+    # 降级 notice 与逐日 git_insights() 逐字对齐
     if not gc["enabled"]:
-        empty["notice"] = "Git 代码分析已关闭（insights.enabled=false 或 insights.git.enabled=false）"
-        return empty
+        off = _empty_result(gc, "Git 代码分析已关闭")
+        return {d: off for d in days}
     if not gc["projects"]:
-        return empty
+        nop = _empty_result(gc, "未配置 Git 仓库（insights.git.projects）或已关闭")
+        return {d: nop for d in days}
 
-    # —— 自动发现仓库 ——
-    projects = list(gc["projects"])
+    projects = _resolve_projects(gc)
+    d0, d1 = min(days), max(days)
+    deep = bool(gc.get("deep"))
+    # 先按仓库取区间提交，再按 cd 分桶
+    per_day: dict = {d: [] for d in days}
+    for proj in projects:
+        path = proj.get("path", "") if isinstance(proj, dict) else str(proj)
+        if not path or not _is_repo(path):
+            continue
+        commits = _git_log_numstat(path, f"{d0} 00:00:00", f"{d1} 23:59:59", gc["timeout_s"])
+        if not commits:
+            continue
+        by_day: dict = {}
+        for c in commits:
+            cd = (c.get("cd") or c.get("date") or "")[:10]
+            if cd in per_day:
+                by_day.setdefault(cd, []).append(c)
+        for day, day_commits in by_day.items():
+            per_day[day].append((proj, day_commits))
+
+    table: dict = {}
+    for day in days:
+        repos: list = []
+        for proj, day_commits in per_day[day]:
+            if deep:
+                # deep 指标按单日计算（author_detail/commit_rhythm/adoption_proxy）
+                # 无法从区间结果切分，故逐仓库重跑（仍比逐日少一次目录 walk）
+                stats = analyze_repo_deep(proj, day, gc["timeout_s"], gc["top_files"],
+                                          ai_project_files=ai_project_files)
+            else:
+                stats = _stats_from_commits(proj, day_commits, gc["top_files"])
+            if stats is not None and stats.get("commit_count", 0) > 0:
+                repos.append(stats)
+        table[day] = _assemble_result(gc, repos, NOTICE_NO_COMMIT)
+    return table
+
+
+def _empty_result(gc: dict, notice: str) -> dict:
+    """套约空态（200 可展示）；批内/批外共用同一结构。"""
+    return {"enabled": bool(gc.get("enabled")), "found": False, "repos": [],
+            "total": {"commit_count": 0, "lines_added": 0, "lines_deleted": 0,
+                      "churn": 0, "files": 0, "modify_ratio": 0.0},
+            "notice": notice}
+
+
+def _resolve_projects(gc: dict) -> list[dict]:
+    """配置的仓库 + auto_discover 发现结果，按 path 去重。"""
+    projects = list(gc.get("projects") or [])
     if gc.get("auto_discover"):
-        for proj in gc["projects"]:
+        for proj in list(gc.get("projects") or []):
             p = proj.get("path", "") if isinstance(proj, dict) else str(proj)
             p = os.path.expanduser(os.path.expandvars(p))
             if os.path.isdir(p) and not _is_repo(p):
-                discovered = auto_discover_repos([p], max_depth=3)
-                projects.extend(discovered)
-    # 去重（按 path）
-    seen_paths: set[str] = set()
-    unique_projects: list[dict] = []
+                projects.extend(auto_discover_repos([p], max_depth=3))
+    seen = set()
+    unique = []
     for proj in projects:
         p = proj.get("path", "") if isinstance(proj, dict) else str(proj)
         p = os.path.normcase(os.path.abspath(p))
-        if p and p not in seen_paths:
-            seen_paths.add(p)
-            unique_projects.append(proj)
+        if p and p not in seen:
+            seen.add(p)
+            unique.append(proj)
+    return unique
 
-    analyze = analyze_repo_deep if gc.get("deep") else analyze_repo
-    repos: list[dict] = []
-    for proj in unique_projects:
-        if gc.get("deep"):
-            stats = analyze(proj, day_str, gc["timeout_s"], gc["top_files"], ai_project_files=ai_project_files)
-        else:
-            stats = analyze(proj, day_str, gc["timeout_s"], gc["top_files"])
-        if stats is not None and stats.get("commit_count", 0) > 0:
-            repos.append(stats)
 
+def _assemble_result(gc: dict, repos: list[dict], notice: str) -> dict:
+    """把单仓统计列表汇总成 git_insights 返回契约。"""
     if not repos:
-        return {"enabled": True, "found": False, "repos": [],
-                "total": {"commit_count": 0, "lines_added": 0, "lines_deleted": 0,
-                          "churn": 0, "files": 0, "modify_ratio": 0.0},
-                "notice": "已配置 Git 仓库，但当天没有本地提交"}
+        return _empty_result(gc, notice)
     total = {
         "commit_count": sum(r["commit_count"] for r in repos),
         "lines_added": sum(r["lines_added"] for r in repos),
@@ -439,17 +562,49 @@ def git_insights(config: dict, day_str: str, ai_project_files: list[str] | None 
         "churn": sum(r["churn"] for r in repos),
         "files": sum(r["files"] for r in repos),
     }
-    total["modify_ratio"] = round(
-        total["lines_deleted"] / total["churn"], 2) if total["churn"] > 0 else 0.0
-    result = {"enabled": True, "found": True, "repos": repos, "total": total, "notice": ""}
-    # deep 模式下补充汇总指标
+    total["modify_ratio"] = (round(total["lines_deleted"] / total["churn"], 2)
+                              if total["churn"] > 0 else 0.0)
+    out = {"enabled": True, "found": True, "repos": repos, "total": total, "notice": ""}
     if gc.get("deep") and repos:
-        all_blocks = [b for r in repos for b in r.get("deep_work_blocks", [])]
-        result["deep_work_summary"] = {
-            "total_blocks": len(all_blocks),
-            "total_deep_work_min": round(sum(b["duration_min"] for b in all_blocks), 1),
+        blocks = [b for r in repos for b in r.get("deep_work_blocks", [])]
+        out["deep_work_summary"] = {
+            "total_blocks": len(blocks),
+            "total_deep_work_min": round(sum(b["duration_min"] for b in blocks), 1),
         }
-    return result
+    return out
+
+
+def git_insights(config: dict, day_str: str, ai_project_files: list[str] | None = None) -> dict:
+    """汇总指定日期的 Git 产出（ROADMAP Phase 2）。
+
+    支持 auto_discover / deep / ai_project_files；range_batch(days) 块内
+    直接取区间批量结果，不再每日跑 git 子进程（v2.9.11，块外行为不变）。
+    """
+    gc = git_config(config)
+
+    # 批内优先：range_batch 已一次性算好区间，直接查表
+    if _RANGE_BATCH is not None and day_str in _RANGE_BATCH["days"]:
+        cached = _batched_day_result(config, day_str, ai_project_files)
+        if cached is not None:
+            return cached
+
+    if not gc["enabled"]:
+        return _empty_result(gc, "代码分析已关闭")
+    if not gc["projects"]:
+        return _empty_result(gc, "未配置 Git 仓库（insights.git.projects）或已关闭")
+
+    projects = _resolve_projects(gc)
+    analyze = analyze_repo_deep if gc.get("deep") else analyze_repo
+    repos = []
+    for proj in projects:
+        if gc.get("deep"):
+            stats = analyze(proj, day_str, gc["timeout_s"], gc["top_files"],
+                            ai_project_files=ai_project_files)
+        else:
+            stats = analyze(proj, day_str, gc["timeout_s"], gc["top_files"])
+        if stats is not None and stats.get("commit_count", 0) > 0:
+            repos.append(stats)
+    return _assemble_result(gc, repos, "已配置 Git 仓库，但当天没有本地提交")
 
 
 def main() -> int:

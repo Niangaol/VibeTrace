@@ -8,6 +8,125 @@
 
 > 🌐 English version: [CHANGELOG.en.md](CHANGELOG.en.md)
 
+## [2.9.12] - 2026-09-20
+
+> 本版合并 v2.9.7 – v2.9.12 六个内部迭代补丁的全部改动（这些迭代号从未单独打 tag
+> 发布，本次以单一补丁版本统一发布）。主题：**取数框架统一、两处 P0 性能修复、
+> 全项目降级可观测**。上一个已发布版本为 v2.9.6（2026-09-14）。
+
+### 重构 · derived.py 派生取数框架（v2.9.8）
+
+- 新增 `derived.py`：`day_bundle()` / `series()` / `cached_endpoint()` 三件套，把
+  growth / tool_compare / query / budget / insights / advice 六个模块里 13 处、229 行
+  逐日 `report.aggregate` + `ai_sessions.collect` 同构循环，收敛为「按天取齐多源数据」
+  的单一实现。`need` 位掩码（NEED_AGG / NEED_AI / NEED_GIT / NEED_WEB）按需取源，
+  未请求的源不 import 不调用，零额外开销。
+- 语义铁律（测试逐条钉住）：每源每天恰调用一次；必须用运行时属性访问
+  `report.aggregate`（100+ 处测试 monkeypatch 打的是模块属性）；AGG/AI 失败即该日
+  作废、GIT/WEB 失败仅降级；不在 `day_bundle` 内嵌套 `collect_fingerprint_batch()`。
+- `growth._aggregate_week` 与 `_merge_incremental` 的单日取数收敛为共用
+  `_day_metrics()`——历史上 focus_hhi / ai_sessions / prompt_efficiency 的口径 bug
+  正是因为两处各写一份、改一处漏一处。
+- 落地过程修正三处框架自身缺陷（v2.9.9）：`series` 增加显式 `days=` 参数（growth 周
+  日期有空洞、query/budget 区间非回溯形状，不再有静默漏日风险）；`day_bundle` 的 AI 源
+  兼容两参实现、WEB 源补传 `config`；git 调用签名修正为 `git_insights(config, day_str)`
+  （此前异常被吞导致 Git 指标静默归零）。
+
+### 性能 · P0-1 浏览器历史免整库拷贝（v2.9.9 / 2.9.10）
+
+- `find_url_for_session` 原先每次调用都 `shutil.copy2` 整个 History 到临时目录再查
+  （Chrome 常态 50–300MB，会话切换即秒级 I/O，且卡在 5 秒轮询线程里）。
+- 现改为 `_query_source_ro()` 直读源库：有 `-wal` 时先试 `mode=ro`（能重放未
+  checkpoint 的访问记录，比原先 immutable 读拷贝还多读到数据），失败（locked /
+  无 `-shm`）再退 `immutable=1`；无 `-wal` 时直接 immutable。
+  - 关键细节：`sqlite3.connect()` 本身不报错，"database is locked" 是第一次
+    `execute` 才抛，所以降级必须包住 `execute`。
+  - `_open_ro` 补 `timeout=0.5`，防万一持锁时挂住轮询线程。
+  - 任何 sqlite 错误返回 `[]`：查询失败不拖垮会话落盘（best-effort 语义不变）。
+- 实测：6.1ms/次 → 0.49ms/次（约 12×），且零磁盘临时文件。
+- 顺带消除一个隐藏副作用：monitor 场景测试此前真的在整库拷贝开发机浏览器库
+  （`_close_session` 不看 `browser_history_enabled` 开关）。
+
+### 性能 · P0-2 git 子进程 N+1 → 区间批量（v2.9.11）
+
+- 新增 `git_insights.range_batch(days)` 上下文（照 `collect_fingerprint_batch` 风格）：
+  进入后一次 `git log --since/--until` 取整个区间，按 **committer date（%cd）** 分桶
+  回填；块内 `git_insights()` 直接查表，块外行为与旧版逐字一致。
+  - 按 `%cd` 而非 `%ad` 分桶是关键：`--since/--until` 本身按 committer date 过滤，
+    author date 会在跨日 amend/rebase 下算错天（已用专门用例钉住）。
+- `git_insights()` 主体拆为 `_resolve_projects` / `_assemble_result` / `_empty_result`，
+  `analyze_repo` 拆为「跑 git」+ `_stats_from_commits`，区间与单日两条路共用同一套
+  聚合代码——避免两处实现各自漂移。
+- `_parse_numstat` 多留 `cd` 字段（旧格式自动回退为 `date`，向后兼容）。
+- `growth._aggregate_week` 与 `_merge_incremental` 的逐日循环外包 `range_batch`。
+- 收益（本地实测）：一周 1.16s → 0.20s，44 天约 9.2s → 1.4s；deep 模式约 18s → 1.4s。
+
+### 修复 · range_batch 等价性（v2.9.12）
+
+- **deep 模式批内丢失整个深度分析**：`_build_day_table()` 原先无条件走浅层
+  `_stats_from_commits()`，`insights.git.deep=true` 时批内结果缺 deep_work_summary 与
+  authors_detail / commit_rhythm / adoption_proxy / language_dist / deep_work_blocks
+  （每个有提交的天 15 个字段）。现按 `gc[deep]` 分支跟 `analyze_repo_deep`，统一复用
+  `_assemble_result` 汇总（deep 指标本按单日计算，无法从区间结果切分，故逐仓库重跑）；
+  `ai_project_files` 此前在批内被完全忽略，现已透传。
+- **降级 notice 文案不一致**：enabled=false / 空 projects 时批内统一返回「批次未启用
+  或无仓库」，与逐日路径的两条提示逐字对齐。
+- **批表未按配置指纹隔离**：`_batch_key()` 写好了却全文 0 处调用（死代码），同一
+  range_batch 块内换 config 会拿到上一份缓存表；现已接入。
+- 汇总逻辑统一跟 `_assemble_result`，不再手写累加公式。
+
+### 可观测 · 34 处「有意降级」不再静默（v2.9.7）
+
+- 新增 `applog.note(exc, ctx)`：全项目 34 处按设计必须继续执行的
+  `except Exception: ... pass`（定价文件损坏、分类规则加载失败、Win32 调用被拒、
+  SQLite 快路回退 JSONL、托盘气泡失败等）统一改走 `note()`——行为完全不变（仍不抛、
+  仍降级），但从「完全无痕迹」变为落盘 `<data_root>/logs/app.log`，仪表盘「日志」视图
+  可直接看到，直指「统计数字对不上却查不到原因」这类雪隐故障。
+- 观测出口本身零风险：挂 NullHandler，未 `configure()` 前零输出（CLI / 测试环境保持
+  安静）；`note()` 自身永不抛异常。
+- 剩余约 19 处 `except Exception: ... pass` 为「日志自身失败」或 `__main__` 入口兜底，
+  按设计保持静默（记日志的故障不能再记日志）。
+
+### 修复与清理
+
+- `metrics_util.merge_dim` 对自建缺字段桶抛 KeyError：float 键累加原为 `t[fk] +=`，
+  调用方传入的桶缺 `cost_in` / `cost_out` / `cost_total` 任一键即崩，与 docstring
+  「字段缺失时按 0 处理」矛盾。已补 `setdefault(fk, 0.0)`，并新增 `_new_bucket()` 由
+  `_MERGE_*_KEYS` 元组生成初始桶，消除「字面量与 KEYS 两处定义」的漂移隐患。
+  对正常输入行为完全不变。
+- `.gitignore` 封堵 170MB 内嵌 Python 运行时误入库：补 `/Python/`、
+  `pythoncore-*-*/`、`review-*.md` 等条目（此前一次 `git add -A` 即可能把整个
+  CPython 交进仓库）。
+- `VibeTrace.spec` hiddenimports 补 `derived`。
+- 修复 v2.9.8 引入的 17 处 `NameError: applog`（alerts/dashboard/monitor/report 四个
+  文件只有函数内惰性 import，模块级调用成未定义名；生产环境一旦走到那些降级分支就会崩，
+  由 ruff F821 报出）。已补模块级 `import applog`。
+- `tool_compare.compare_tools` 已知语义变化（有意）：`report.aggregate` 单日失败时
+  原先保留当天 AI 侧数据，现因走 derived 而整日作废；两源正常时结果逐字段相同。
+
+### 测试隔离修复（发布前）
+
+- `test_api_insights_includes_time_saved` 传入关闭 AI 的独立 `config.json`：该用例
+  触发 `/api/insights` 的 AI 路径，若沿用默认配置会读到开发机仓库根的 `config.json`
+  （`insights.ai.enabled=true`）从而**真实调用 LLM 接口**并挂到超时（CI 无此文件所以
+  从不暴露，属测试隔离缺陷）。修复后断言只关心离线 time_saved 字段。
+
+### 测试
+
+- 新增：`test_derived.py`（33 例）、`test_git_range_batch.py`（17 例）、
+  `test_find_url_no_copy.py`（8 例）、`test_applog_note.py`（6 例）、
+  `test_metrics_util.py`（44 例）、`test_tray.py`（41 例 + 1 skip）。
+- `test_git_range_batch` 的 repo fixture 加 `requires_git` 守卫：Windows 下 pytest 的
+  fd 级捕获会使进程继承的 stdin 句柄失效，`subprocess.run` 抛
+  `OSError [WinError 6]`（环境固有、非代码问题），守卫后该场景降级为 skip 而非 error。
+
+### 全量状态（发布前实测 · 2026-09-20）
+
+- **全量 `pytest tests`：882 passed / 7 skipped / 0 failed**（unit / integration / api / frontend / security / performance / e2e 全链路，192s）
+  - 其中 tests/unit：696 passed / 7 skipped / 0 failed
+  - tests/security + tests/e2e + tests/performance + tests/api：108 passed / 0 failed
+- ruff check .：**0 违规**
+
 ## [2.9.6] - 2026-09-14
 
 > 主题：修复 v2.9.5 的托盘行为回归——单击托盘图标错误地打开浏览器，恢复为唤出 Electron 桌面应用窗口。

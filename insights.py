@@ -23,9 +23,11 @@ import threading
 import urllib.error
 import urllib.request
 
+import applog  # noqa: E402
 import paths  # noqa: E402
 import metrics_util  # noqa: E402  统计辅助单一来源：熵/HHI/工具切换计数（纯函数，无业务依赖）
 import report  # noqa: E402
+import derived  # noqa: E402  取数框架（v2.9.8）
 import version  # noqa: E402
 
 DEFAULT_DATA_ROOT = paths.default_data_root()
@@ -1425,8 +1427,8 @@ def _read_ai_cache(date_str: str, data_root: str) -> dict | None:
             data = json.load(fh)
         if isinstance(data, dict) and isinstance(data.get("insights"), list):
             return data
-    except Exception:  # noqa: BLE001 —— 缓存损坏不影响重新生成
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 缓存损坏不影响重新生成
+        applog.note(_exc, "insights: AI 洞察缓存读取失败，按无缓存处理")
     return None
 
 
@@ -1736,15 +1738,15 @@ def _chat_completion(cfg: dict, prompt: str, max_tokens: int = 800) -> str:
 
 
 def _week_stats(date_str: str, data_root: str) -> dict:
-    """近 7 天（含当日）活跃汇总 {total_ms, sessions}，供提示词「近 7 天对比」段。"""
-    days = [
-        (datetime.date.fromisoformat(date_str) - datetime.timedelta(days=i)).isoformat()
-        for i in range(7)
-    ]
+    """近 7 天（含当日）活跃汇总 {total_ms, sessions}，供提示词「近 7 天对比」段。
+
+    取数走 derived.series（v2.9.8 起与 growth/tool_compare/query/budget/advice
+    共用同一框架）：单日失败仅跳过该日，与原先逐日循环语义一致。
+    """
     total = 0
     sessions = 0
-    for day in days:
-        agg = report.aggregate(day, data_root)
+    for b in derived.series(date_str, data_root, 7, need=derived.NEED_AGG):
+        agg = b.get("agg") or {}
         total += int(agg.get("total_active_ms") or 0)
         sessions += int(agg.get("session_count") or 0)
     return {"total_ms": total, "sessions": sessions}

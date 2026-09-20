@@ -14,6 +14,7 @@ import ctypes
 import ctypes.wintypes as wt
 import time
 
+import applog  # noqa: E402
 from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
@@ -228,8 +229,8 @@ def enum_processes() -> dict[int, ProcessInfo]:
                 ok = kernel32.Process32NextW(snapshot, ctypes.byref(entry))
         finally:
             kernel32.CloseHandle(snapshot)
-    except Exception:
-        pass
+    except Exception as _exc:
+        applog.note(_exc, "win32core: 进程枚举失败，沿用旧缓存（数据可能过期）")
     _process_cache["ts"] = now
     _process_cache["data"] = result
     return result
@@ -269,8 +270,8 @@ def get_exe_name(pid: int) -> str:
                 return exe
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
-        pass
+    except Exception as _exc:
+        applog.note(_exc, "win32core: 进程名查询失败，返回空")
     return ""
 
 
@@ -299,8 +300,8 @@ def get_process_path(pid: int) -> str:
                 return path
         finally:
             kernel32.CloseHandle(handle)
-    except Exception:
-        pass
+    except Exception as _exc:
+        applog.note(_exc, "win32core: 进程路径查询失败，返回空")
     return ""
 
 

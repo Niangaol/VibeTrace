@@ -19,6 +19,7 @@ import re
 import sys
 import time
 
+import applog  # noqa: E402
 import paths  # noqa: E402
 
 CATEGORY_ORDER = [
@@ -54,8 +55,8 @@ def _load_builtin_defaults() -> dict:
             data = json.load(fh)
         if isinstance(data, dict):
             return data
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as _exc:  # noqa: BLE001
+        applog.note(_exc, "classifier: 内置默认规则加载失败，使用精简兜底规则")
     return {
         "data_root": "",
         "apps": {},
@@ -265,8 +266,8 @@ def load_app_groups(data_root: str | None = None) -> dict:
                     groups["group_meta"] = {
                         str(k): dict(v) for k, v in gm.items() if isinstance(v, dict)
                     }
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as _exc:  # noqa: BLE001
+            applog.note(_exc, "classifier: 应用分组落盘失败，沿用内存分组")
     _groups_cache["ts"] = now
     _groups_cache["data"] = groups
     return groups

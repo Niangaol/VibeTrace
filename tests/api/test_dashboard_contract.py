@@ -100,7 +100,14 @@ def test_api_insights_includes_time_saved(tmp_path):
     os.makedirs(os.path.join(tmp_root, day), exist_ok=True)
     with open(os.path.join(tmp_root, day, "usage.jsonl"), "w", encoding="utf-8") as fh:
         fh.write(json.dumps({"start": f"{day}T10:00:00", "end": f"{day}T11:00:00", "duration_ms": 3600000, "exe": "code.exe", "app": "VS Code", "title": "a.py", "category": "AI编程", "contact": None, "ai_tool": "opencode", "active": True}, ensure_ascii=False) + "\n")
-    server = dashboard.create_server(tmp_root, port=0)
+    # 隔离配置：本用例会触发 /api/insights 的 AI 洞察路径，若沿用默认配置
+    # （开发机仓库根的 config.json，insights.ai.enabled=true）会真实调用
+    # LLM 接口并挂到超时——CI 无该文件所以从不暴露，属测试隔离缺陷。
+    # 传入关闭 AI 的独立 config.json，断言只关心离线 time_saved 字段。
+    cfg_path = os.path.join(tmp_root, "config.json")
+    with open(cfg_path, "w", encoding="utf-8") as fh:
+        json.dump({"insights": {"ai": {"enabled": False}}}, fh)
+    server = dashboard.create_server(tmp_root, port=0, config_path=cfg_path)
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:

@@ -94,6 +94,67 @@ def _week_days(week: tuple[int, int], day_list: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 # 周聚合（§3.2）
 # ---------------------------------------------------------------------------
+
+
+def _day_metrics(day: str, data_root: str, config: dict) -> dict:
+    """单日三源取数 + 指标原值（v2.9.8 抽出，_aggregate_week / _merge_incremental 共用）。
+
+    两处原本各写一份 40 行同构循环（取数源与指标逐行相同，只差归约公式），
+    历史上 focus_hhi / ai_sessions / prompt_efficiency 的口径 bug 就是这么漏掉的。
+
+    铁律：每个数据源每天恰好调用一次（test_growth 用 env["counts"] 精确断言）；
+    不用 collect_fingerprint_batch 包裹（调用方自行决定批作用域）。
+    """
+    agg = report.aggregate(day, data_root)
+    by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
+    ai_ms = int(by_cat.get("AI编程", 0) or 0)
+    total_active = int(agg.get("total_active_ms") or 0)
+
+    total = ai_sessions.collect(day, config).get("total") or {}
+    qs = total.get("quality_summary") or {}
+
+    git_result = git_insights.git_insights(config, day)
+    git_total = git_result.get("total") or {}
+
+    out = {
+        "focus_score": float(insights.behavior_insights(agg, config)["focus_score"] or 0),
+        "saved_ms": int(insights.time_saved_insights(agg, config).get("saved_ms") or 0),
+        "ai_minutes": ai_ms / 60000.0,
+        "adoption": ai_ms / total_active if total_active > 0 else 0.0,
+        "generated_lines": int(total.get("generated_lines") or 0),
+        # 会话数口径：collect 的 total 无 sessions 键，取 conversations 条数
+        # （collect 每日按 turns 截断 top20，会话极多的日子会略低估，仅作提示效率分母）
+        "ai_sessions": len(total.get("conversations") or []),
+        "quality_avg": float(qs.get("avg") or 0) if int(qs.get("sessions_scored") or 0) > 0 else None,
+        "lines_added": int(git_total.get("lines_added") or 0),
+        "modify_ratio": (float(git_total.get("modify_ratio") or 0)
+                         if bool(git_result.get("found")) and int(git_total.get("churn") or 0) > 0 else None),
+        "entropy": None,
+        "switch_rate": None,
+        "hhi": None,
+    }
+
+    # v2.9.1 新指标：数据源是 ai_sessions.collect 的 total.by_model
+    # （report.aggregate 不产出 by_model，v2.9.2 曾误读 agg 侧导致恒 None）
+    by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
+    if by_model:
+        model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
+        out["entropy"] = metrics_util.shannon_entropy(model_counts)
+
+    sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
+    if sessions:
+        ordered = sorted(sessions, key=lambda s: s.get("start") or "")
+        total_ms = max(total_active, sum(int(s.get("duration_ms") or 0) for s in ordered))
+        total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
+        if total_hours > 0:
+            # 折序列 + 数相邻变化（共享实现；ordered 已排好序，重复排序结果不变）
+            switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(ordered))
+            out["switch_rate"] = switch_count / total_hours
+        shares = insights._project_shares(sessions)
+        if shares:
+            # HHI 不逐次舍入（与 insights._hhi 口径不同）：先累加原始值，最后取均值再保留 4 位
+            out["hhi"] = metrics_util.hhi(shares)
+    return out
 def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | None:
     """按 §3.2 表聚合一周；days 不足 min_days_per_week → None（该周丢弃）。
 
@@ -135,49 +196,29 @@ def _aggregate_week(days: list[str], data_root: str, config: dict) -> dict | Non
     adoption_vals: list[float] = []
     ai_sessions_count = 0
     ai_by_day: list[float] = []
-    for day in days:
-        agg = report.aggregate(day, data_root)
-        focus_vals.append(float(insights.behavior_insights(agg, config)["focus_score"] or 0))
-        total = ai_sessions.collect(day, config).get("total") or {}
-        qs = total.get("quality_summary") or {}
-        if int(qs.get("sessions_scored") or 0) > 0:
-            quality_vals.append(float(qs.get("avg") or 0))
-            scored_days += 1
-        generated_lines += int(total.get("generated_lines") or 0)
-        # 会话数口径：collect 的 total 无 "sessions" 键，取 conversations 条数
-        # （collect 每日按 turns 截断 top20，会话极多的日子会略低估——仅作提示效率分母）
-        ai_sessions_count += len(total.get("conversations") or [])
-        git_result = git_insights.git_insights(config, day)
-        git_total = git_result.get("total") or {}
-        lines_added += int(git_total.get("lines_added") or 0)
-        if bool(git_result.get("found")) and int(git_total.get("churn") or 0) > 0:
-            modify_vals.append(float(git_total.get("modify_ratio") or 0))
-        by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
-        ai_minutes += int(by_cat.get("AI编程", 0) or 0) / 60000.0
-        saved_ms += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
-        ai_by_day.append(int(by_cat.get("AI编程", 0) or 0) / 60000.0)
-        # v2.9.1 新指标：数据源是 ai_sessions.collect 的 total.by_model
-        # （report.aggregate 不产出 by_model——v2.9.2 曾误读 agg 侧导致恒 None）
-        by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
-        if by_model:
-            model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
-            entropy_vals.append(metrics_util.shannon_entropy(model_counts))
-        sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
-        if sessions:
-            ordered = sorted(sessions, key=lambda s: s.get("start") or "")
-            total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
-            total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
-            if total_hours > 0:
-                # 折序列 + 数相邻变化（共享实现；ordered 已排好序，重复排序结果不变）
-                switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(ordered))
-                switch_vals.append(switch_count / total_hours)
-            shares = insights._project_shares(sessions)
-            if shares:
-                # HHI 不逐次舍入（与 insights._hhi 口径不同）：先累加原始值，最后取均值再保留 4 位
-                hhi_vals.append(metrics_util.hhi(shares))
-        ai_total = int(by_cat.get("AI编程", 0) or 0)
-        total_active = int(agg.get("total_active_ms") or 0)
-        adoption_vals.append(ai_total / total_active if total_active > 0 else 0.0)
+    # v2.9.11: 区间批量——N 天只跑一次 git log，块内按天查表
+    with git_insights.range_batch(days):
+        for day in days:
+            m = _day_metrics(day, data_root, config)  # v2.9.8：单日取数收敛到共用实现
+            focus_vals.append(m["focus_score"])
+            if m["quality_avg"] is not None:
+                quality_vals.append(m["quality_avg"])
+                scored_days += 1
+            generated_lines += m["generated_lines"]
+            ai_sessions_count += m["ai_sessions"]
+            lines_added += m["lines_added"]
+            if m["modify_ratio"] is not None:
+                modify_vals.append(m["modify_ratio"])
+            ai_minutes += m["ai_minutes"]
+            saved_ms += m["saved_ms"]
+            ai_by_day.append(m["ai_minutes"])
+            if m["entropy"] is not None:
+                entropy_vals.append(m["entropy"])
+            if m["switch_rate"] is not None:
+                switch_vals.append(m["switch_rate"])
+            if m["hhi"] is not None:
+                hhi_vals.append(m["hhi"])
+            adoption_vals.append(m["adoption"])
 
     # 学习曲线：周内 AI 时长线性斜率（归一化到 [0,1]）
     learning_curve = 0.0
@@ -356,45 +397,29 @@ def _merge_incremental(old: dict, delta_days: list[str], data_root: str, config:
     hhi_delta: list[float] = []
     adoption_delta: list[float] = []
     ai_sessions_delta = 0
-    for day in delta_days:
-        agg = report.aggregate(day, data_root)
-        focus_delta.append(float(insights.behavior_insights(agg, config)["focus_score"] or 0))
-        total = ai_sessions.collect(day, config).get("total") or {}
-        qs = total.get("quality_summary") or {}
-        if int(qs.get("sessions_scored") or 0) > 0:
-            quality_delta.append(float(qs.get("avg") or 0))
-            scored_delta += 1
-        generated_delta += int(total.get("generated_lines") or 0)
-        # 与 _aggregate_week 同口径：conversations 条数（collect 每日截断 top20）
-        ai_sessions_delta += len(total.get("conversations") or [])
-        git_result = git_insights.git_insights(config, day)
-        git_total = git_result.get("total") or {}
-        lines_added_delta += int(git_total.get("lines_added") or 0)
-        if bool(git_result.get("found")) and int(git_total.get("churn") or 0) > 0:
-            modify_delta.append(float(git_total.get("modify_ratio") or 0))
-        by_cat = agg.get("by_category") if isinstance(agg.get("by_category"), dict) else {}
-        ai_minutes_delta += int(by_cat.get("AI编程", 0) or 0) / 60000.0
-        saved_ms_delta += int(insights.time_saved_insights(agg, config).get("saved_ms") or 0)
-        # v2.9.1 新指标：模型多样熵取 ai_sessions.collect 的 total.by_model（与 _aggregate_week 一致）
-        by_model = total.get("by_model") if isinstance(total.get("by_model"), dict) else {}
-        if by_model:
-            model_counts = [max(1, int(v.get("turns") or 0)) for v in by_model.values()]
-            entropy_delta.append(metrics_util.shannon_entropy(model_counts))
-        sessions = [s for s in (agg.get("sessions") or []) if isinstance(s, dict)]
-        if sessions:
-            ordered = sorted(sessions, key=lambda s: s.get("start") or "")
-            total_ms = max(int(agg.get("total_active_ms") or 0), sum(int(s.get("duration_ms") or 0) for s in ordered))
-            total_hours = total_ms / 3600000.0 if total_ms > 0 else 0.0
-            if total_hours > 0:
-                # 折序列 + 数相邻变化（共享实现，与 _aggregate_week 同构）
-                switch_count = metrics_util.count_switches(metrics_util.tool_switch_series(ordered))
-                switch_delta.append(switch_count / total_hours)
-            shares = insights._project_shares(sessions)
-            if shares:
-                hhi_delta.append(metrics_util.hhi(shares))
-        ai_total = int(by_cat.get("AI编程", 0) or 0)
-        total_active = int(agg.get("total_active_ms") or 0)
-        adoption_delta.append(ai_total / total_active if total_active > 0 else 0.0)
+    # v2.9.11: 区间批量（同 _aggregate_week 先例）
+    with git_insights.range_batch(delta_days):
+        for day in delta_days:
+            m = _day_metrics(day, data_root, config)  # v2.9.8：单日取数收敛到共用实现
+            focus_delta.append(m["focus_score"])
+            if m["quality_avg"] is not None:
+                quality_delta.append(m["quality_avg"])
+                scored_delta += 1
+            generated_delta += m["generated_lines"]
+            # 与 _aggregate_week 同口径：conversations 条数（collect 每日截断 top20）
+            ai_sessions_delta += m["ai_sessions"]
+            lines_added_delta += m["lines_added"]
+            if m["modify_ratio"] is not None:
+                modify_delta.append(m["modify_ratio"])
+            ai_minutes_delta += m["ai_minutes"]
+            saved_ms_delta += m["saved_ms"]
+            if m["entropy"] is not None:
+                entropy_delta.append(m["entropy"])
+            if m["switch_rate"] is not None:
+                switch_delta.append(m["switch_rate"])
+            if m["hhi"] is not None:
+                hhi_delta.append(m["hhi"])
+            adoption_delta.append(m["adoption"])
     # 合并
     # focus_score 均值
     old_focus = float(old.get("focus_score") or 0)

@@ -21,6 +21,7 @@ import contextlib
 import datetime
 import re
 
+import applog  # noqa: E402
 import metrics_util  # 统计辅助单一来源：美元格式化（纯函数，无业务依赖）
 
 # ---------------------------------------------------------------------------
@@ -128,8 +129,8 @@ def _collect_day(date_str: str, data_root: str, config: dict) -> dict:
             if isinstance(meta, dict):
                 out["by_tool"][name] = out["by_tool"].get(name, 0.0) + (
                     float(meta.get("cost_total") or 0.0))
-    except Exception:  # noqa: BLE001 —— 解析失败降级为空数据，不阻断主流程
-        pass
+    except Exception as _exc:  # noqa: BLE001 —— 解析失败降级为空数据，不阻断主流程
+        applog.note(_exc, "budget: 成本聚合解析失败，降级为空数据（预算告警将不触发）")
     return out
 
 

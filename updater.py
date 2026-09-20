@@ -30,6 +30,7 @@ import urllib.error
 import urllib.request
 from urllib.parse import urlparse
 
+import applog  # noqa: E402
 import version  # noqa: E402
 
 GITHUB_LATEST_URL = "https://api.github.com/repos/Niangaol/VibeTrace/releases/latest"
@@ -218,8 +219,8 @@ def download(url: str, dest: str, expected_size: int | None = None,
                     if progress is not None:
                         try:
                             progress(got, total)
-                        except Exception:  # noqa: BLE001 —— 进度回调失败不影响下载
-                            pass
+                        except Exception as _exc:  # noqa: BLE001 —— 进度回调失败不影响下载
+                            applog.note(_exc, "updater: 下载进度回调失败，忽略本次回调")
     except urllib.error.HTTPError as exc:
         _cleanup(part)
         raise UpdateError(f"下载失败：服务器返回 HTTP {exc.code}") from exc

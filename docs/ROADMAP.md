@@ -1,6 +1,6 @@
 # VibeTrace 项目规划文档：AI 编程深度追踪
 
-> **文档版本**：v1.3 | **更新日期**：2026-08-23 | **状态**：已落地至 v2.8.2（批次二已入 master 待发）
+> **文档版本**：v2.0 | **更新日期**：2026-09-20 | **状态**：已落地至 v2.9.12（Phase 1–4 全部完成，见下文「当前功能回顾」）
 
 ## 一、项目定位与愿景
 
@@ -35,7 +35,7 @@
 - ✅ 可选 SQLite 后端与一致性校验（JSONL 仍为原始事实源）
 - ✅ 纯 Python + ctypes，零第三方运行时依赖
 - ✅ 打包为独立 exe，支持安装/卸载、应用内更新
-- ✅ 统一测试体系：pytest ~670 项用例（原 test_all.py 336 项断言已全部并入 pytest 分层，test_all.py 退役；新增并发锤/配置流/暂停退出等回归钉扎）
+- ✅ 统一测试体系：pytest 全量 882 passed / 7 skipped（unit / integration / api / frontend / security / performance / e2e 七层；原 test_all.py 已退役；新增并发锤/配置流/暂停退出/区间批量等价性等回归钉扎）
 - ✅ ROADMAP Phase 1：对话轮次 / Token 估算 / 按模型·项目拆分 / 会话详情面板与日报章节
 - ✅ ROADMAP Phase 3：按模型费用估算 / 按项目成本分摊 / 成本面板与日报成本章节（+ 周/月汇总成本账本）
 - ✅ ROADMAP Phase 4：死循环检测 + 专注度评分 + Vibe 编程人格分析（洞察页面板与日报今日建议）
@@ -50,7 +50,11 @@
 - ✅ 每日目标 streak（`goals.py`：总活跃/编码时长目标 + 连续达成天数）
 - ✅ 个性化基线（`learn.py`：滑动窗口 + z-score 常态检测）
 - ✅ 性能指纹缓存（ai_sessions / browser_history / sqlite_store 提速）
-- ✅ 覆盖率门禁 70%（pytest ~670 项，实测 80%）
+- ✅ derived.py 派生取数框架（v2.9.12）：13 处逐日循环收敛为 day_bundle / series 单一实现，growth / tool_compare / query / budget / insights / advice 六模块共用
+- ✅ 浏览器历史免整库拷贝（v2.9.12）：_query_source_ro 直读源库，6.1ms → 0.49ms/次（约 12×）
+- ✅ Git 多日分析区间批量（v2.9.12）：range_batch 一次 git log 按 committer date 分桶，44 天约 9.2s → 1.4s
+- ✅ 降级可观测（v2.9.12）：34 处「有意降级」静默异常统一落盘 logs/app.log（applog.note）
+- ✅ 覆盖率门禁 70%（pytest 全量 882 项，实测约 80%）
 - ✅ Git 侧采纳率代理指标（`adoption.py` + `/api/adoption`：retention/reworked_ratio 粗代理，免责+折叠展示，confidence 永不 high；AI 侧 per-file 归因按 spike 结论判砍）
 - ✅ 受限查询模板扩充（q6 产出对比 / q7 专注度最佳日 / q8 成本趋势，双周期解析与周期别名）
 - ✅ dashboard 纯函数外置 `dashboard_util.py` + frontend smoke / e2e 冒烟测试上线
