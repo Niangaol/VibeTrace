@@ -113,6 +113,14 @@
 - **Python**：
   - 跑测试/ruff：`C:\Python314\python.exe`（仓库根的 `python` 是内嵌精简运行时，**没有 pytest/ruff**，别用它跑测试）
   - 打包 exe：带 PyInstaller 的 3.11 在 `C:\Users\niangao\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe`
+  - **CI 同款验证环境**：`D:\_vt_venv311`（uv venv --python 3.11 + coverage/pytest/zstandard），
+    发布前用它跑 CI 同款命令可提前抓到手速过、CI 挂的环境差异（v2.9.12 连抓两个：
+    旧版 SQLite 对损坏库的行为、快速盘粗粒度 mtime）：
+    `D:\_vt_venv311\Scripts\python.exe -m coverage run -m pytest tests/unit tests/integration tests/api tests/security tests/performance tests/e2e -p no:cacheprovider -o addopts="" -q`
+- **git 推送**：本机 `http.sslBackend` 曾被配成 `gnutls`（Git for Windows 只支持 `schannel`），
+  推送必报 `Unsupported SSL backend`；已在本仓库配置修好：`git config http.sslBackend schannel`。
+  另：execSync 超时会留僵死 git.exe 进程， credential-manager 可能弹框等交互——
+  批量推送建议 URL 内嵌 token + `GIT_TERMINAL_PROMPT=0`，或放后台跑再轮询。
 - **测试**：`C:\Python314\python.exe -m pytest tests -q -p no:cacheprovider -o addopts=""`
   - 注意：`-q` 已在 pyproject addopts 里，显式传 `-o addopts=""` 才能看到 passed/failed 摘要行（否则只打印进度点）
   - Windows 临时目录权限异常时，先清理 `%TEMP%\usagemon_hist_*` / `dsh-*`
