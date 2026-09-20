@@ -89,6 +89,12 @@
 
 ### 修复与清理
 
+- **日期列表缓存双份漂移（发布阻断修复）**：`goals._available_days` 曾自持一份
+  `_DAYS_CACHE`，与 `dashboard_util._days_cache` 互不相通，而 `seed_day` 只失效
+  后者——CI 快速盘同一 mtime 时钟刻度内「播种新日期 → 读取」会拿到旧列表，
+  `compute_streak` 把已达成的一天判成断签（真实 CI 失败两次）。现 goals 委托
+  dashboard_util 单一实现（缓存口径与失效入口统一，消除两份漂移），`seed_day`
+  同时清理 `report._agg_cache`；新增粗粒度时钟回归测试钉住该场景。
 - `metrics_util.merge_dim` 对自建缺字段桶抛 KeyError：float 键累加原为 `t[fk] +=`，
   调用方传入的桶缺 `cost_in` / `cost_out` / `cost_total` 任一键即崩，与 docstring
   「字段缺失时按 0 处理」矛盾。已补 `setdefault(fk, 0.0)`，并新增 `_new_bucket()` 由
@@ -122,7 +128,7 @@
 
 ### 全量状态（发布前实测 · 2026-09-20）
 
-- **全量 `pytest tests`：882 passed / 7 skipped / 0 failed**（unit / integration / api / frontend / security / performance / e2e 全链路，192s）
+- **全量 `pytest tests`：884 passed / 7 skipped / 0 failed**（unit / integration / api / frontend / security / performance / e2e 全链路，192s）
   - 其中 tests/unit：696 passed / 7 skipped / 0 failed
   - tests/security + tests/e2e + tests/performance + tests/api：108 passed / 0 failed
 - ruff check .：**0 违规**

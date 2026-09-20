@@ -23,9 +23,7 @@ API（dashboard.py 注册）：
 from __future__ import annotations
 
 import datetime
-import os
 import re
-import time
 
 import report
 
@@ -77,37 +75,20 @@ def _day_met(agg: dict, defs: list[dict]) -> bool:
     return all(_actual_for(g["id"], agg) >= g["target_min"] for g in defs)
 
 
-_DAYS_CACHE: dict[str, tuple[float, float, list[str]]] = {}  # root -> (mtime, ts, days)
-_DAYS_TTL = 5.0  # 秒（与 dashboard._available_days / classifier 缓存同范式）
+# 日期列表缓存统一收敛到 dashboard_util._available_days（单一实现，seed_day 的
+# invalidate_days_cache 才能覆盖到——v2.9.12 修复：goals 曾自持一份 _DAYS_CACHE，
+# 只靠 mtime 失效，CI 快速盘同一时钟刻度内「播种→读取」拿到旧列表，streak 误判）。
 
 
 def _available_days(data_root: str) -> list[str]:
-    """数据根目录下全部 YYYY-MM-DD 文件夹（升序），带 mtime+TTL 缓存。
+    """数据根目录下全部 YYYY-MM-DD 文件夹（升序）——委托 dashboard_util 单一实现。
 
-    streak 回推逐日聚合本身有 report._agg_cache 兜底，这里消除每次请求
-    的重复 os.listdir。返回列表副本，调用方修改不影响缓存。
+    缓存口径（mtime + TTL）与失效入口（invalidate_days_cache）都以
+    dashboard_util 为唯一事实源，避免两份缓存各自漂移（v2.9.12）。
     """
-    key = os.path.normcase(os.path.abspath(data_root or "."))
-    now = time.monotonic()
-    entry = _DAYS_CACHE.get(key)
-    if entry is not None and now - entry[1] < _DAYS_TTL \
-            and _root_mtime(data_root) == entry[0]:
-        return list(entry[2])
-    days: list[str] = []
-    if os.path.isdir(data_root):
-        for name in os.listdir(data_root):
-            if _DAY_RE.fullmatch(name):
-                days.append(name)
-    days.sort()
-    _DAYS_CACHE[key] = (_root_mtime(data_root), now, days)
-    return list(days)
+    import dashboard_util  # noqa: PLC0415  单一实现（纯标准库，无循环依赖）
 
-
-def _root_mtime(data_root: str) -> float:
-    try:
-        return os.path.getmtime(data_root)
-    except OSError:
-        return 0.0
+    return dashboard_util._available_days(data_root)
 
 
 def compute_streak(date: str, data_root: str, cfg: dict,

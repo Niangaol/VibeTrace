@@ -83,6 +83,32 @@ def test_streak_consecutive_and_gap_breaks(tmp_path):
     print("  [PASS] streak_consecutive_and_gap_breaks")
 
 
+def test_streak_sees_newly_seeded_day_under_coarse_mtime(tmp_path, monkeypatch):
+    """CI 快速盘回归：目录 mtime 时钟粒度内「播种→读取」也必须看到新日期。
+
+    历史（v2.9.12 修复）：goals 曾自持一份 _DAYS_CACHE，只靠 mtime 失效；
+    CI 快速盘同一时钟刻度内播种新日期后 mtime 不变，缓存不失效，
+    compute_streak 拿到旧日期列表 → 当日已达成却判 streak=0（真实 CI 失败）。
+    现委托 dashboard_util 单一实现 + seed_day 主动失效，与时钟粒度无关。
+    """
+    import dashboard_util
+
+    root = str(tmp_path)
+    cfg = _cfg(daily_active_min=60, daily_coding_min=0)
+    for d in ("2099-04-10", "2099-04-11", "2099-04-12"):
+        seed_day(root, d, [make_record(d, 9, 60)])
+    # 先建缓存（此时 04-14 不存在）
+    streak0, _ = goals.compute_streak("2099-04-14", root, goals.goals_config(cfg))
+    assert streak0 == 0
+    # 模拟粗粒度文件系统时钟：目录 mtime 恒定，缓存无法靠 mtime 自然失效
+    monkeypatch.setattr(dashboard_util, "_days_mtime", lambda dr: 1000.0)
+    # 同一时钟刻度内播种新日期并读取
+    seed_day(root, "2099-04-14", [make_record("2099-04-14", 9, 60)])
+    streak3, met3 = goals.compute_streak("2099-04-14", root, goals.goals_config(cfg))
+    assert met3 is True and streak3 == 1, "粗粒度时钟下播种新日期后应只计当日"
+    print("  [PASS] streak_sees_newly_seeded_day_under_coarse_mtime")
+
+
 def test_streak_today_unmet_keeps_yesterday(tmp_path):
     root = str(tmp_path)
     cfg = _cfg(daily_active_min=60, daily_coding_min=0)

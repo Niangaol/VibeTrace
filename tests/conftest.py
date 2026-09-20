@@ -169,7 +169,9 @@ def seed_day(root: str, date: str, records: list[dict]) -> str:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
     try:
         import dashboard_util
-        dashboard_util.invalidate_days_cache()
+        import report
+        dashboard_util.invalidate_days_cache()   # 日期列表缓存（含 goals 委托的那份）
+        report._agg_cache.clear()                # 按日聚合缓存（mtime+size 键，同刻度重播种会撞）
     except Exception:  # noqa: BLE001 —— 失效失败不影响造数本身
         pass
     return day_dir

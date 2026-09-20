@@ -107,6 +107,14 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 ### Fixes & cleanup
 
+- **Duplicate days-list caches unified (release blocker)**: `goals._available_days`
+  kept its own `_DAYS_CACHE`, disjoint from `dashboard_util._days_cache`, while
+  `seed_day` only invalidated the latter — on CI's fast disk, seeding a new date
+  and reading it back within one mtime clock tick returned the stale list, so
+  `compute_streak` counted a met day as broken (a real CI failure, twice). goals
+  now delegates to dashboard_util's single implementation (cache semantics and
+  invalidation entry unified), `seed_day` also clears `report._agg_cache`, and a
+  coarse-clock regression test pins the scenario.
 - `metrics_util.merge_dim` raised KeyError on caller-built buckets missing float keys:
   accumulation was `t[fk] +=`, crashing when `cost_in` / `cost_out` / `cost_total` was
   absent — contradicting the docstring's "missing fields count as 0". Added
@@ -145,7 +153,7 @@ Release flow: `git tag vX.Y.Z` → CI builds and publishes the Release automatic
 
 ### Full status (measured pre-release · 2026-09-20)
 
-- **Full `pytest tests`: 882 passed / 7 skipped / 0 failed** (unit / integration / api / frontend / security / performance / e2e, 192s)
+- **Full `pytest tests`: 884 passed / 7 skipped / 0 failed** (unit / integration / api / frontend / security / performance / e2e, 192s)
   - of which tests/unit: 696 passed / 7 skipped / 0 failed
   - tests/security + tests/e2e + tests/performance + tests/api: 108 passed / 0 failed
 - ruff check .: **0 violations**
