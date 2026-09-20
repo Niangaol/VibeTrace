@@ -118,9 +118,28 @@ def test_locked_source_falls_back_to_immutable(tmp_path, monkeypatch):
 
 
 def test_sqlite_error_returns_empty_not_raise(tmp_path):
-    """源库损坏时返回 []（查询失败不拖垮会话落盘）。"""
+    """源库损坏时返回 []（查询失败不拖垮会话落盘）。
+
+    查询必须走 schema 读取（sqlite_master）："SELECT 1" 是常量表达式，部分
+    SQLite 版本根本不碰库文件，损坏文件也能返回 [(1,)]（CI 的 Python 3.11
+    自带旧版 SQLite 实测如此）。读 sqlite_master 必然解析第 1 页头部，
+    "file is not a database" 跨版本稳定触发。
+    """
     db = str(tmp_path / "History")
-    open(db, "wb").write(b"not a sqlite database at all")
+    with open(db, "wb") as fh:
+        fh.write(b"not a sqlite database at all")
+    assert browser_history._query_source_ro(db, "SELECT name FROM sqlite_master", ()) == []
+
+
+def test_sqlite_error_via_connect_returns_empty(tmp_path, monkeypatch):
+    """connect 层抛 sqlite 错误也返回 []（不依赖具体 SQLite 版本行为）。"""
+    def boom(*a, **kw):
+        raise sqlite3.DatabaseError("database is locked")
+
+    monkeypatch.setattr(browser_history.sqlite3, "connect", boom)
+    db = str(tmp_path / "History")
+    with open(db, "wb") as fh:
+        fh.write(b"not a sqlite database at all")
     assert browser_history._query_source_ro(db, "SELECT 1", ()) == []
 
 

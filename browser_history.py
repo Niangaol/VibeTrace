@@ -174,13 +174,16 @@ def _query_source_ro(db_path: str, sql: str, params: tuple) -> list[tuple]:
                 conn.close()
         except sqlite3.Error:
             pass  # 落到 immutable
-    conn = _open_ro(db_path)
+    # connect 本身也要兜住：docstring 承诺「任何 sqlite 错误都返回 []」，
+    # 而 _open_ro 在极少数边角（I/O 错误等）会在 connect 阶段就抛
     try:
-        return conn.execute(sql, params).fetchall()
+        conn = _open_ro(db_path)
+        try:
+            return conn.execute(sql, params).fetchall()
+        finally:
+            conn.close()
     except sqlite3.Error:
         return []
-    finally:
-        conn.close()
 
 def _open_copy(db_copy_path: str) -> sqlite3.Connection:
     """普通方式打开复制到临时目录的副本。
